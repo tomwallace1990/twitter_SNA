@@ -30,6 +30,7 @@ selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets
 noresults = 5 # int. number of results to show
 removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
 edgeweighting = False # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
+usebigdata = True
 
 projectpath = './' # Set the root folder
 inputfile = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019.csv' # Manually set the input file
@@ -129,6 +130,14 @@ sender, receiver = edgelister(account, corpus, selfloop, removedups) # Call the 
 	# to save the data as an edge list, include an output path as option 3 abvoe such as outputpath = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019UTF8_edgelist.csv' 
 	# Sender and receiver are not equal length lists showing the asymmetric links
 
+if usebigdata == True:
+	inputfile = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion30052019_edgelist.csv' # Manually set the input file
+	df_in = pd.read_csv(inputfile)
+	sender = df_in['Sender'].tolist()
+	receiver = df_in['Receiver'].tolist()
+	sender = sender[:1000]
+	receiver = receiver[:1000]
+
 #Hash usernames
 sender = [hashlib.sha224(handle.encode()).hexdigest() for handle in sender]
 receiver = [hashlib.sha224(handle.encode()).hexdigest() for handle in receiver]
@@ -175,7 +184,7 @@ print('\n')
 if edgeweighting == False:
 	print('Transitivity (% of possible triangles which are extant):',nx.transitivity(network))
 
-print(nx.average_clustering(network)) # this may need an edge weight value which will need to be calculated
+#print(nx.average_clustering(network)) # this may need an edge weight value which will need to be calculated
 
 #Graphing
 influencers_list = [item for sublist in influencers_list for item in sublist] # This flattens the list of influencers
@@ -185,5 +194,5 @@ labeldicto={} # These 3 lines convert the list into a dictonary which is used in
 for account in influencers_list:
 	labeldicto.update({str(account):str(account[:15])}) # Only display the first 15 chars of the name. Twitter handles can only be 15 chars long, but if using a hash this makes the graph more readable
 
-nx.draw_networkx(network, alpha=0.7, labels=labeldicto) # Generate the graph
+nx.draw_networkx(network, alpha=0.7, labels=labeldicto, node_color='#23b7ce', node_size=35, font_size=12, edge_color='#a3a3a3') # Generate the graph
 plt.show() # Display the graph
