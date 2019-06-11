@@ -16,6 +16,9 @@
 #	6. Interface - leave to Barrachd, I'll do backend
 #	9. Follower/following networks
 #	10. Get data from platfrom - set up query on alerter
+#	11. Identify verified users
+#	12. Switch to be about given username
+#	13. Capitalisation
 
 
 #Done
@@ -34,18 +37,59 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import hashlib
+import json
+import tweepy
+import pickle
+from time import sleep
 
 #####Parameters and settings#####
-selfloop = True # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the egde list
-noresults = 5 # int. number of results to show
+selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the egde list
+noresults = 10 # int. number of results to show
 removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
 edgeweighting = False # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
-usebigdata = True
+user_search_sleep = 0 # How long to sleep for when looping over users and making API calls
+max_tweets = 300 # How many tweets to request
+query = 'Extinction rebellion' # Topic of the request
+allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
+hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 
 projectpath = './' # Set the root folder
 inputfile = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019.csv' # Manually set the input file
+tokenpath = 'C:/Users/Tom Wallace/Dropbox/Stats/twitter_tokens/twitter-api-token_nyetarussian.json' # Tokens for API authentication
 
 #####Functions#####
+
+def athenticate(tokenpath):
+	token_file=open(tokenpath, 'r')
+	tokens = json.load(token_file)
+	token_file.close
+
+	consumer_key = tokens[0]['consumer_key']
+	consumer_secret = tokens[0]['consumer_secret']
+	access_token = tokens[0]['access_token']
+	access_token_secret = tokens[0]['access_token_secret']
+
+	# Authenticate to Twitter API
+	auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
+	auth.set_access_token(access_token, access_token_secret)
+	api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
+	return api
+
+def searchtwit(query, max_tweets, allowRTs):
+	
+	searched_tweets = [status for status in tweepy.Cursor(api.search, q=query, lang='en').items(max_tweets)]
+	
+	filteredlist=[]
+	if allowRTs == False: # this version of the searchtwit function can filter out retweets if required
+		for tweet_obj in searched_tweets: # for each tweet object in the list returned from the search
+			if re.match('RT ', tweet_obj.text) is None: # re.match only searches from the front of the string, so no need to use a starting anchor ^
+				filteredlist.append(tweet_obj) # make a list of non RTs
+		searched_tweets = filteredlist # replace origional list with filtered list
+
+	tweet_author = [tweet.user.screen_name for tweet in searched_tweets] # get a list of just the authors of each tweet
+	tweet_text = [tweet.text for tweet in searched_tweets] # get a list of just the text of each tweet
+
+	return tweet_author, tweet_text, searched_tweets
 
 def edgelister(authors, tweets, selfloop=False, removedups=False, sav_path=None): 
 	# This function takes tweet objects and generates an edgelist, which is a pair of equal length lists showing the sender and receiver of each tweet which contains one or more '@'
@@ -83,6 +127,40 @@ def edgelister(authors, tweets, selfloop=False, removedups=False, sav_path=None)
 		print('>>> WARN: Mismatch error <<<')
 		quit() # If something is wrong warn the user and exit
 
+def prevalidate (valid_dict, searched_tweets):
+
+	for tweet in searched_tweets:
+		valid_dict.update({tweet.user.screen_name.lower() : tweet.user.verified})
+		if re.match('RT ', tweet.text) is not None:
+			valid_dict.update({tweet.retweeted_status.user.screen_name.lower() : tweet.retweeted_status.user.verified})
+
+	return valid_dict
+
+def primevalidate (users, valid_dict, user_search_sleep):
+
+	print('Making API calls for ', len(users), ' users. Please wait.', sep='')
+	for user in users:
+		try:
+			userinfo = api.get_user(screen_name=user)	
+			valid_dict.update({userinfo.screen_name.lower() : userinfo.verified})
+		except:
+			valid_dict.update({user : None})
+		sleep(user_search_sleep)
+
+	return valid_dict
+
+def hasher (sender, receiver, hashing_type, valid_dict):
+	if hashing_type == 'valid':
+		sender = [hashlib.sha224(handle.encode()).hexdigest() if valid_dict.get(handle)!=True else handle for handle in sender]
+		receiver = [hashlib.sha224(handle.encode()).hexdigest() if valid_dict.get(handle)!=True else handle for handle in receiver]
+	elif hashing_type == 'full':
+		sender = [hashlib.sha224(handle.encode()).hexdigest() for handle in sender]
+		receiver = [hashlib.sha224(handle.encode()).hexdigest() for handle in receiver]
+	elif hashing_type == 'none':
+		pass
+
+	return sender, receiver
+
 def spinnerette(senders, receivers, edgeweighting=False):
 	# This function takes in an edge list as a sender and receiver list (as produced by edgelister) and converts them into a network object from the library networkx
 
@@ -93,6 +171,7 @@ def spinnerette(senders, receivers, edgeweighting=False):
 	
 	for sender, receiver in zip(senders,receivers): # Need to use a zip loop again
 		network.add_edge(sender, receiver) # Add each edge to the network one by one
+	
 	return network # Give back to completed network object
 
 def centrality(network):
@@ -124,33 +203,74 @@ def centrality(network):
 
 	return df_centrality
 
+def print_results_userlevel(df_centrality):
+	df_centrality_width = df_centrality.shape # Get the width of the dataframe as an int - it is used in the loop below. Width is the number of columns/ number of metrics which were calculated
+	colnames = list(df_centrality.columns.values) # Get the headers from the data frame so they can be used in the output below - they are set in the centrality function
+
+	print('\n\nMost influential accounts\n-------------------------')
+	for label,value in zip(colnames, range(0,df_centrality_width[1])): # this loop takes each of the metrics in turn and prints the top 5 accounts for each metric. Effecitvely this is the mian results output
+		series_results = df_centrality[df_centrality.columns[value]] # Create a temp series by slicing into the dataframe with the value iterator
+		series_results_sort = series_results.sort_values(ascending=False) # reverse sort the temp seires so the top influencers are at the top
+		print(value, '. Top ', noresults, ' influential accounts based on ', label, ' centrality.', sep='') #Print a header with the column name for info
+		if series_results.sum() == 0: # This if checks if the seires has valid results, if not it will print a warning instead
+			print('>>>WARN: Results are all naught. The network may be too small/simple to calculate this metric. <<<')
+		elif np.std(series_results_sort[:noresults]) == 0: # This cheks if the results are all the same number, if so the metric lacks variation and an error is shown
+			print('>>>WARN: Top', noresults, 'results are all equal. The network may be too small/simple to calculate this metric. <<<')
+		else:
+			print(series_results_sort[:noresults]) # If it is valid the top 5 influencers will be printed
+			influencers = list(series_results_sort[:noresults].index) # These two lines are used for the graphing below, they add the names of the top 5 influencers to a list
+			influencers_list.append(influencers)
+		print('\n')
+
 #####Main#####
-#File I/O
-df_in = pd.read_csv(inputfile) # Read the input file into a data frame
+#Authenticate via public API
+api = athenticate(tokenpath)
 
-#Data managment
-for value in ['Source', 'Time Posted', 'Location', 'Klout', 'Follow']: # Drop unneeded columns
-	df_in.drop(columns=[value], inplace=True)
+#Grab tweets on given topic from API. Account is list of senders, corpus is matching list of tweet text, searched_tweets is matching list of the full tweet objects
+#account, corpus, searched_tweets = searchtwit(query, max_tweets, allowRTs)
+#dump_data = zip(account, corpus, searched_tweets)
+#pickle.dump(dump_data, open( './tweets', 'wb'))
 
-account = df_in['Account'].tolist() # Get the senders of each tweet as a list
-corpus = df_in['Content'].tolist() # Gte content of each tweet as a list
+dump_data = pickle.load(open( './tweets', 'rb'))
+account, corpus, searched_tweets = zip(*dump_data)
+
+#Case conversion
+account = [text.lower() for text in account]
+corpus = [text.lower() for text in corpus]
 
 #Create edge list
 sender, receiver = edgelister(account, corpus, selfloop, removedups) # Call the edgelister function to convert the authors and tweets into an edge list
 	# to save the data as an edge list, include an output path as option 3 abvoe such as outputpath = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019UTF8_edgelist.csv' 
 	# Sender and receiver are not equal length lists showing the asymmetric links
 
-if usebigdata == True:
-	inputfile = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion30052019_edgelist.csv' # Manually set the input file
-	df_in = pd.read_csv(inputfile)
-	sender = df_in['Sender'].tolist()
-	receiver = df_in['Receiver'].tolist()
-	sender = sender[:1000]
-	receiver = receiver[:1000]
+#Validation - prevalidate (get validation from existing tweet objects)
+	#Pre validation uses infrom from the already downloaded tweet objects and saves making unnessiary API calls. It reduces the number of calls by more than 90%
+valid_dict = {}
+valid_dict = prevalidate(valid_dict, searched_tweets)
+
+#Validation - primevalidate (get remaining users status from API)
+	#This gets the accounts not captured during prevalidation - each account requires an API call so this is inefficent
+dict_list = list(valid_dict.keys()) # Get a list of what's we already have validation info for
+
+unverified_users=[] # Initialize new list of users not in dictionary 
+for user in receiver: # All senders are in the dictionary so just loop through recivers
+	if user not in dict_list:
+		unverified_users.append(user) # if the user isnt in the dict then add them to the new list
+unverified_users = list(dict.fromkeys(unverified_users)) # Filter the new list for duplicates
+
+valid_dict = primevalidate(unverified_users, valid_dict, user_search_sleep) # Update the dictonary with the extra users, this should be the same length as the number of nodes in the network
+
+#Remove invalid user names
+invalid = [handle for handle in (list(set(sender+receiver))) if valid_dict.get(handle)==None] # It is possible to tweet at an invalid handle, these are picked up as part of primevalidate and removed here (only handles in primevalidate are picked up)
+
+for send, rec in zip(sender,receiver): # for each dyadic edge
+	for inval in invalid: # for each invalid handle
+		if inval in send or inval in rec: #if either part of the dyad is invalid remove the whole dyad
+			sender.remove(send)
+			receiver.remove(rec)
 
 #Hash usernames
-#sender = [hashlib.sha224(handle.encode()).hexdigest() for handle in sender]
-#receiver = [hashlib.sha224(handle.encode()).hexdigest() for handle in receiver]
+sender, receiver = hasher(sender, receiver, hashing_type, valid_dict)
 
 #Create network
 network = spinnerette(sender, receiver, edgeweighting) # Get the network object from the constructor function
@@ -158,41 +278,24 @@ network = spinnerette(sender, receiver, edgeweighting) # Get the network object 
 
 #Get node level metrics
 df_centrality = centrality(network) # Get the centrality metrics from the function by supplying the network
-	#print(df_centrality) # show the data frame - it could also be written out as a CSV for manual processing
-
-df_centrality_width = df_centrality.shape # Get the width of the dataframe as an int - it is used in the loop below. Width is the number of columns/ number of metrics which were calculated
-colnames = list(df_centrality.columns.values) # Get the headers from the data frame so they can be used in the output below - they are set in the centrality function
 
 influencers_list=[] # initialize a list of top influencer accounts, used for graphing later
 
-print('\n\nMost influential accounts\n-------------------------')
-for label,value in zip(colnames, range(0,df_centrality_width[1])): # this loop takes each of the metrics in turn and prints the top 5 accounts for each metric. Effecitvely this is the mian results output
-	series_results = df_centrality[df_centrality.columns[value]] # Create a temp series by slicing into the dataframe with the value iterator
-	series_results_sort = series_results.sort_values(ascending=False) # reverse sort the temp seires so the top influencers are at the top
-	print(value, '. Top ', noresults, ' influential accounts based on ', label, ' centrality.', sep='') #Print a header with the column name for info
-	if series_results.sum() == 0: # This if checks if the seires has valid results, if not it will print a warning instead
-		print('>>>WARN: Results are all naught. The network may be too small/simple to calculate this metric. <<<')
-	elif np.std(series_results_sort[:noresults]) == 0: # This cheks if the results are all the same number, if so the metric lacks variation and an error is shown
-		print('>>>WARN: Top', noresults, 'results are all equal. The network may be too small/simple to calculate this metric. <<<')
-	else:
-		print(series_results_sort[:noresults]) # If it is valid the top 5 influencers will be printed
-		influencers = list(series_results_sort[:noresults].index) # These two lines are used for the graphing below, they add the names of the top 5 influencers to a list
-		influencers_list.append(influencers)
-	print('\n')
+print_results_userlevel(df_centrality)
 
 #Network level metrics
 print('\nNetwork level metrics\n-------------------------')
 print('Number of nodes (accounts):',nx.number_of_nodes(network))
 print('Number of edges (mentions between accounts):',nx.number_of_edges(network))
-print('Network density (% of possible edges which are extant):',(nx.density(network))*100)
+print('Network density (% of possible edges which are extant): ',(nx.density(network))*100,'%',sep='') # this is in % so 100 times higher than standard density
+print('Allow retweets:', str(allowRTs))
 print('Allow repeated contact:', str(edgeweighting))
 print('Remove duplicate tweets:', str(removedups))
 print('Allow self loops:', str(selfloop))
-print('Number of self loop edges:',nx.number_of_selfloops(network))
-print('\n')
-
+print('Number of self loop edges:',nx.number_of_selfloops(network)) # This can be !0 even when the toggle is set to false as sometimes accounts retweet or mention themselves.
 if edgeweighting == False:
 	print('Transitivity (% of possible triangles which are extant):',nx.transitivity(network))
+print('\n')
 
 #print(nx.average_clustering(network)) # this may need an edge weight value which will need to be calculated
 
@@ -205,4 +308,4 @@ for account in influencers_list:
 	labeldicto.update({str(account):str(account[:15])}) # Only display the first 15 chars of the name. Twitter handles can only be 15 chars long, but if using a hash this makes the graph more readable
 
 nx.draw_networkx(network, alpha=0.7, labels=labeldicto, node_color='#23b7ce', node_size=35, font_size=12, edge_color='#a3a3a3') # Generate the graph
-plt.show() # Display the graph
+#plt.show() # Display the graph
