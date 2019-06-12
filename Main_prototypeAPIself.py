@@ -16,9 +16,6 @@
 #	6. Interface - leave to Barrachd, I'll do backend
 #	9. Follower/following networks
 #	10. Get data from platfrom - set up query on alerter
-#	12. Switch to be about given username
-#	14. Replace hashes in output
-
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
@@ -29,6 +26,8 @@
 #	8. Toggle on/off or mark retweets - do they already do this? added to the searchtwit function in Bluetick.py
 #	13. Capitalisation
 #	11. Identify verified users
+#	14. Replace hashes in output
+#	12. Switch to be about given username
 
 #####Imports#####
 import pandas as pd
@@ -45,6 +44,11 @@ from time import sleep
 import random
 
 #####Parameters and settings#####
+projectpath = './' # Set the root folder
+inputfile = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019.csv' # Manually set the input file
+tokenpath = 'C:/Users/Tom Wallace/Dropbox/Stats/twitter_tokens/twitter-api-token_nyetarussian.json' # Tokens for API authentication
+random.seed(123456789)
+
 selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the egde list
 noresults = 10 # int. number of results to show
 removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
@@ -55,10 +59,8 @@ query = 'Extinction rebellion' # Topic of the request
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 given_user = 'ajplus' # The input user to return results for
-
-projectpath = './' # Set the root folder
-inputfile = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019.csv' # Manually set the input file
-tokenpath = 'C:/Users/Tom Wallace/Dropbox/Stats/twitter_tokens/twitter-api-token_nyetarussian.json' # Tokens for API authentication
+centrality_selection = ['degree', 'closeness', 'eigenvector'] #Options: 'degree', 'in degree', 'out degree', 'closeness', 'betweenness', 'eigenvector'
+random_depth = 0.3 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
 
 #####Functions#####
 
@@ -207,99 +209,69 @@ def centrality(network):
 
 	return df_centrality
 
-def print_results_userlevel(df_centrality):
-	df_centrality_width = df_centrality.shape # Get the width of the dataframe as an int - it is used in the loop below. Width is the number of columns/ number of metrics which were calculated
-	colnames = list(df_centrality.columns.values) # Get the headers from the data frame so they can be used in the output below - they are set in the centrality function
+def print_results_userlevel(result_list, id_list, test_name):
+	# This print function is a bit complex but basically it prints the sequential top 10, then the given user account, then 9 random accounts ranked lower than the user account - 20 results total
+	# That is unless the given user account is in the top 10, then it prints the top results in order until it hits the uder account, then it prints the user accout and then random accounts until it hits 20 in total
 
-	df_centrality = df_centrality.sort_values(by=['degree'],ascending=False)
-	degree_cent = list(df_centrality['degree'])
-	index_list = list(df_centrality.index.tolist())
+	#Get the variables from the function head
+	result_centrality = result_list
+	index_list = id_list
 
-	print('\n\nYou in the network\n-------------------------')
+	#Get a list of unique scores - this is important as many scores are the same which prevents proper sorting
+	test_results_unique = list(sorted(set(result_centrality), reverse=True))
 
-	counter=1
+	#This block creates a dictonary of unique values and an incrimenting counter so the top unique score is 1, the second highest is 2, etc
+	dict_counter=0
+	test_results_unique_dict={}
+	for element in test_results_unique:
+		dict_counter=dict_counter+1
+		test_results_unique_dict.update({element:dict_counter})
+
+	#Use the dictonary to create a list matching the user and results list but which contains each users grouped rank
+	grouped_result=[]
+	for handle,result in zip(index_list,result_centrality): # For each handle and score
+		for key,value in test_results_unique_dict.items(): # For each unique score in the dict
+			if result==key: # when the score in the origional list matches that in the dict, add the grouped score to a new list
+				grouped_result.append(value)
+
+	#Ths block gets the slice position of the given account by incrimenting a counter until it finds the given user
+	given_user_counter=0
 	for handle in index_list:
-		
 		if handle!=given_user:
-			counter=counter+1
+			given_user_counter=given_user_counter+1
 		else:
 			break
-	print('You are ', counter, ' out of ', len(index_list) ,' for degree centrality. This puts you in the top ', '%.4f' % (100-(counter/len(index_list))), '% of users in this network!', sep='')
+	given_user_position = grouped_result[given_user_counter] # the users grouped result is found by slicing into the grouped list with the result from above - as both lists have the same order
 	
-	print("\nHere's how the top public accounts scored")
+	print('You are ', given_user_position, ' out of ', max(grouped_result) ,' for ',test_name, ' centrality. This means youu are higher ranked than ', '%.1f' % (100-(((given_user_position)/max(grouped_result)))*100), '% of users in this network!', sep='')
+	
+	print("\nHere's how some verified public accounts scored")
 	previous_result = []
 	random_list = [random.uniform(0, 1) for each in index_list]
 	counter_list = list(range(0,len(index_list)))
 	result_count=1
-	for handle,result,rando,counter in zip(index_list,degree_cent,random_list,counter_list):
+	for handle,result,rando,position in zip(index_list,result_centrality,random_list,grouped_result):
 		if len(handle) < 56 and handle!=given_user:
 			if result_count > 10:
 				continue
-			print(result_count, '. ', handle, '. Rank: ', counter+1, ' Score: ', '%.4f' % result, sep='')
+			print('\tRank: ', f'{position:02d}', '\tScore: ', '%.4f' % result, '\tUser: ', handle, sep='')
 			result_count=result_count+1
 			previous_result.append(handle)
 		elif handle==given_user:
-			print('\n',result_count, '. \t > You are here! Rank: ', counter+1, ' Score: ', '%.4f' % result, ' <\n', sep='')
+			print('\n\tRank: ',f'{position:02d}', '\tScore: ', '%.4f' % result, '\tYou are here! (Your handle: ', handle, ')\n', sep='')
 			result_count=result_count+1
 			previous_result.append(handle)
-			given_user_count = counter
-	for handle,result,rando,counter in zip(index_list,degree_cent,random_list,counter_list):	
-		if given_user in previous_result and handle not in previous_result and counter>given_user_count and len(handle) < 56 and rando <0.2:
-			print(result_count, '. ', handle, '. Rank: ', counter+1, ' Score: ', '%.4f' % result, sep='')
+			given_user_count = position
+	for handle,result,rando,position in zip(index_list,result_centrality,random_list,grouped_result):	
+		if given_user in previous_result and handle not in previous_result and position>given_user_count and len(handle) < 56 and rando < random_depth:
+			print('\tRank: ', position, '\tScore: ', '%.4f' % result, '\tUser: ', handle, sep='')
 			result_count=result_count+1
 			if result_count > 20:
 				break
 
-
-
-
-	quit()
-
-	print("\nHere's where some public accounts scored lower down")
-	random_list = [random.uniform(0, 1) for each in index_list]
-	counter=0
-	result_count = 1
-	for handle,result, rando in zip(index_list,degree_cent, random_list):
-		counter=counter+1
-		if len(handle) < 56 and handle not in previous_result and rando <0.2:
-			print(result_count, '. ', handle, '. Rank: ', counter, ' Score: ', '%.4f' % result, sep='')
-			result_count=result_count+1
-			if result_count > 10:
-				break
-
-	print('\n')
-	previous_result = []
-	counter_list = list(range(0,len(index_list)))
-	result_count = 1
-	for handle,result,rando,counter in zip(index_list,degree_cent, random_list,counter_list):
-		if len(handle) < 56 and handle !=given_user:
-			print(result_count, '. ', handle, '. Rank: ', counter+1, ' Score: ', '%.4f' % result, sep='')
-			result_count=result_count+1
-			previous_result.append(handle)
-			if result_count > 10:
-				break
-
-
-	quit()
-
-
-	for label,value in zip(colnames, range(0,df_centrality_width[1])): # this loop takes each of the metrics in turn and prints the top 5 accounts for each metric. Effecitvely this is the mian results output
-		series_results = df_centrality[df_centrality.columns[value]] # Create a temp series by slicing into the dataframe with the value iterator
-		series_results_sort = series_results.sort_values(ascending=False) # reverse sort the temp seires so the top influencers are at the top
-		print(value, '. Top ', noresults, ' influential accounts based on ', label, ' centrality.', sep='') #Print a header with the column name for info
-		if series_results.sum() == 0: # This if checks if the seires has valid results, if not it will print a warning instead
-			print('>>>WARN: Results are all naught. The network may be too small/simple to calculate this metric. <<<')
-		elif np.std(series_results_sort[:noresults]) == 0: # This cheks if the results are all the same number, if so the metric lacks variation and an error is shown
-			print('>>>WARN: Top', noresults, 'results are all equal. The network may be too small/simple to calculate this metric. <<<')
-		else:
-			print(series_results_sort[:noresults]) # If it is valid the top 5 influencers will be printed
-			influencers = list(series_results_sort[:noresults].index) # These two lines are used for the graphing below, they add the names of the top 5 influencers to a list
-			influencers_list.append(influencers)
-		print('\n')
-
 #####Main#####
 #Authenticate via public API
-api = athenticate(tokenpath)
+#api = athenticate(tokenpath)
 
 #Grab tweets on given topic from API. Account is list of senders, corpus is matching list of tweet text, searched_tweets is matching list of the full tweet objects
 #account, corpus, searched_tweets = searchtwit(query, max_tweets, allowRTs)
@@ -346,6 +318,11 @@ for send, rec in zip(sender,receiver): # for each dyadic edge
 			sender.remove(send)
 			receiver.remove(rec)
 
+#Check given account is in network
+if given_user not in sender and given_user not in receiver:
+	print('>>> WARN: The given handle is not in the network which was collected, try altering query <<<\nExiting.')
+	quit()
+
 #Hash usernames
 sender, receiver = hasher(sender, receiver, hashing_type, valid_dict)
 
@@ -358,7 +335,15 @@ df_centrality = centrality(network) # Get the centrality metrics from the functi
 
 influencers_list=[] # initialize a list of top influencer accounts, used for graphing later
 
-print_results_userlevel(df_centrality)
+#Print results
+print('\n\nYou in the network\n-------------------------')
+for test in centrality_selection:
+	df_centrality = df_centrality.sort_values(by=[test],ascending=False)
+	test_results = list(df_centrality[test])
+	index_list = list(df_centrality.index.tolist())
+
+	print_results_userlevel(test_results,index_list,test)
+	print('\n')
 
 #Network level metrics
 print('\nNetwork level metrics\n-------------------------')
@@ -380,9 +365,23 @@ print('\n')
 influencers_list = [item for sublist in influencers_list for item in sublist] # This flattens the list of influencers
 influencers_list = list(dict.fromkeys(influencers_list)) # This removes any duplicates
 
+influencers_list=[given_user]
+
 labeldicto={} # These 3 lines convert the list into a dictonary which is used in the graphing below to label the top influencers. Any account to appear in the top 5 of any of the metrics will have a label.
 for account in influencers_list:
 	labeldicto.update({str(account):str(account[:15])}) # Only display the first 15 chars of the name. Twitter handles can only be 15 chars long, but if using a hash this makes the graph more readable
 
-nx.draw_networkx(network, alpha=0.7, labels=labeldicto, node_color='#23b7ce', node_size=35, font_size=12, edge_color='#a3a3a3') # Generate the graph
+nodelist = (list(set(sender+receiver)))
+
+colour_list=[]
+size_list=[]
+for node in nodelist:
+	if node==given_user:
+		colour_list.append('#FF0000')
+		size_list.append(250)
+	else:
+		colour_list.append('#23b7ce')
+		size_list.append(35)
+
+nx.draw_networkx(network, alpha=0.7, nodelist=nodelist, labels=labeldicto, node_color=colour_list, node_size=size_list, font_size=12, edge_color='#a3a3a3') # Generate the graph
 plt.show() # Display the graph
