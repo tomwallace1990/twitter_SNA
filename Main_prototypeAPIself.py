@@ -43,6 +43,7 @@ import tweepy
 import pickle
 from time import sleep
 import random
+import scipy.stats as stats
 
 #####Parameters and settings#####
 projectpath = './' # Set the root folder
@@ -58,10 +59,10 @@ user_search_sleep = 0 # How long to sleep for when looping over users and making
 max_tweets = 2500 # How many tweets to request
 query = 'Extinction rebellion' # Topic of the request
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
-hashing_type = 'none' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
-given_user = 'ajplus' # The input user to return results for
+hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
+given_user = 'ajplus' # The input user to return results for #glasswyrm #ajplus
 centrality_selection = ['degree', 'closeness', 'eigenvector'] #Options: 'degree', 'in degree', 'out degree', 'closeness', 'betweenness', 'eigenvector'
-random_depth = 0.3 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
+random_depth = 0.05 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
 
 #####Functions#####
 
@@ -210,7 +211,7 @@ def centrality(network):
 
 	return df_centrality
 
-def print_results_userlevel(result_list, id_list, test_name):
+def print_results_userlevel(result_list, id_list):
 	# This print function is a bit complex but basically it prints the sequential top 10, then the given user account, then 9 random accounts ranked lower than the user account - 20 results total
 	# That is unless the given user account is in the top 10, then it prints the top results in order until it hits the uder account, then it prints the user accout and then random accounts until it hits 20 in total
 
@@ -220,9 +221,31 @@ def print_results_userlevel(result_list, id_list, test_name):
 	#Get the variables from the function head
 	result_centrality = result_list
 	index_list = id_list
-
+	
+	"""
+	#This block creates a list of bins and how many users are in each, the first 1 means only a single user as the top score, the 1071 at the end means the lowest score is shared by 1071 users
+	previ_vlaue=0
+	count=0
+	binned_count_list=[]
+	for value in result_centrality:
+		if value != previ_vlaue:
+			count = count + 1
+			binned_count_list.append(count)
+			previ_vlaue = value
+			count = 0
+		else:
+			count = count + 1
+	binned_count_list.append(count)
+	binned_count_list.pop(0) # this may not be robust, check what happens if there is a double at the start
+	
 	#Get a list of unique scores - this is important as many scores are the same which prevents proper sorting
 	test_results_unique = list(sorted(set(result_centrality), reverse=True))
+	
+	#for count,scroe in zip(binned_count_list,test_results_unique):
+	#	print(count, scroe)
+	print(binned_count_list)
+
+
 
 	#This block creates a dictonary of unique values and an incrimenting counter so the top unique score is 1, the second highest is 2, etc
 	dict_counter=0
@@ -230,45 +253,55 @@ def print_results_userlevel(result_list, id_list, test_name):
 	for element in test_results_unique:
 		dict_counter=dict_counter+1
 		test_results_unique_dict.update({element:dict_counter})
-
+	print(test_results_unique_dict)
 	#Use the dictonary to create a list matching the user and results list but which contains each users grouped rank
 	grouped_result=[]
 	for handle,result in zip(index_list,result_centrality): # For each handle and score
 		for key,value in test_results_unique_dict.items(): # For each unique score in the dict
 			if result==key: # when the score in the origional list matches that in the dict, add the grouped score to a new list
 				grouped_result.append(value)
-
+	print(grouped_result)
+	"""
+	
 	#Ths block gets the slice position of the given account by incrimenting a counter until it finds the given user
-	given_user_counter=0
+	given_user_counter=1
 	for handle in index_list:
 		if handle!=given_user:
 			given_user_counter=given_user_counter+1
 		else:
 			break
-	given_user_position = grouped_result[given_user_counter] # the users grouped result is found by slicing into the grouped list with the result from above - as both lists have the same order
 	
-	print('You are ', given_user_position, ' out of ', max(grouped_result) ,' for ',test_name, ' centrality. This means you are higher ranked than ', '%.1f' % (100-(((given_user_position)/max(grouped_result)))*100), '% of users in this network!', sep='')
+
+	percentile_list = [stats.percentileofscore(result_centrality, item) for item in result_centrality]
+
+	
+
+	#Get a list from 1 to the max used to show user position
+	counter_list = list(range(1,len(index_list)+1))
+
+	print('You are higher ranked than ', '%.1f' % percentile_list[given_user_counter], '% of users in this network!', sep='')
 	
 	print("\nHere's how some verified public accounts scored")
 	previous_result = []
 	random_list = [random.uniform(0, 1) for each in index_list]
-	counter_list = list(range(0,len(index_list)))
 	result_count=1
-	for handle,result,rando,position in zip(index_list,result_centrality,random_list,grouped_result):
+	for handle,result,rando,position in zip(index_list,result_centrality,random_list,percentile_list):
 		if len(handle) < 56 and handle!=given_user:
 			if result_count > 10:
 				continue
-			print('\tRank: ', f'{position:02d}', '\tScore: ', '%.4f' % result, '\tUser: ', handle, sep='')
+			print('\tRank: ','%.1f' % position, '% \tScore: ', '%.4f' % result, '\tUser: ', handle, sep='')
 			result_count=result_count+1
 			previous_result.append(handle)
 		elif handle==given_user:
-			print('\n\tRank: ',f'{position:02d}', '\tScore: ', '%.4f' % result, '\tYou are here! (Your handle: ', handle, ')\n', sep='')
+			print('--------------------------------------------------------------------')
+			print('\n\tRank: ','%.1f' % position, '% \tScore: ', '%.4f' % result, '\tYou are here! (Your handle: ', handle, ')\n', sep='')
+			print('--------------------------------------------------------------------')
 			result_count=result_count+1
 			previous_result.append(handle)
-			given_user_count = position
-	for handle,result,rando,position in zip(index_list,result_centrality,random_list,grouped_result):	
-		if given_user in previous_result and handle not in previous_result and position>given_user_count and len(handle) < 56 and rando < random_depth:
-			print('\tRank: ', position, '\tScore: ', '%.4f' % result, '\tUser: ', handle, sep='')
+			given_user_pos = position
+	for handle,result,rando,position in zip(index_list,result_centrality,random_list,percentile_list):	
+		if given_user in previous_result and handle not in previous_result and position<given_user_pos and len(handle) < 56 and rando < random_depth:
+			print('\tRank: ','%.1f' % position, '% \tScore: ', '%.4f' % result, '\tUser: ', handle, sep='')
 			result_count=result_count+1
 			if result_count > 20:
 				break
@@ -341,13 +374,14 @@ influencers_list=[] # initialize a list of top influencer accounts, used for gra
 
 #Print results
 print('\n\nYou in the network\n-------------------------')
-for test in centrality_selection:
-	df_centrality = df_centrality.sort_values(by=[test],ascending=False)
-	test_results = list(df_centrality[test])
-	index_list = list(df_centrality.index.tolist())
+df_centrality['Combined_cent'] = df_centrality['degree'] + df_centrality['closeness'] + df_centrality['eigenvector']
+df_centrality = df_centrality.sort_values(by=['Combined_cent'],ascending=False)
 
-	print_results_userlevel(test_results,index_list,test)
-	print('\n')
+test_results = list(df_centrality['Combined_cent'])
+index_list = list(df_centrality.index.tolist())
+
+print_results_userlevel(test_results,index_list)
+print('\n')
 
 #Network level metrics
 print('\nNetwork level metrics\n-------------------------')
@@ -388,4 +422,4 @@ for node in nodelist:
 		size_list.append(35)
 
 nx.draw_networkx(network, alpha=0.7, nodelist=nodelist, labels=labeldicto, node_color=colour_list, node_size=size_list, font_size=12, edge_color='#a3a3a3') # Generate the graph
-plt.show() # Display the graph
+#plt.show() # Display the graph
