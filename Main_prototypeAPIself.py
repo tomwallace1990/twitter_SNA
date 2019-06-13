@@ -28,6 +28,7 @@
 #	11. Identify verified users
 #	14. Replace hashes in output
 #	12. Switch to be about given username
+#	15. Display grouped ranks rather than pure ordered scores becasue of invarience in scores (particularly in smaller networks)
 
 #####Imports#####
 import pandas as pd
@@ -57,7 +58,7 @@ user_search_sleep = 0 # How long to sleep for when looping over users and making
 max_tweets = 2500 # How many tweets to request
 query = 'Extinction rebellion' # Topic of the request
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
-hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
+hashing_type = 'none' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 given_user = 'ajplus' # The input user to return results for
 centrality_selection = ['degree', 'closeness', 'eigenvector'] #Options: 'degree', 'in degree', 'out degree', 'closeness', 'betweenness', 'eigenvector'
 random_depth = 0.3 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
@@ -213,6 +214,9 @@ def print_results_userlevel(result_list, id_list, test_name):
 	# This print function is a bit complex but basically it prints the sequential top 10, then the given user account, then 9 random accounts ranked lower than the user account - 20 results total
 	# That is unless the given user account is in the top 10, then it prints the top results in order until it hits the uder account, then it prints the user accout and then random accounts until it hits 20 in total
 
+	#PROBLEM the percentage of dividing group by total group must be wrong, need to work out how to calc the real one
+	#problem is different numbers of users in different groups - more in higher groups numbers
+
 	#Get the variables from the function head
 	result_centrality = result_list
 	index_list = id_list
@@ -243,7 +247,7 @@ def print_results_userlevel(result_list, id_list, test_name):
 			break
 	given_user_position = grouped_result[given_user_counter] # the users grouped result is found by slicing into the grouped list with the result from above - as both lists have the same order
 	
-	print('You are ', given_user_position, ' out of ', max(grouped_result) ,' for ',test_name, ' centrality. This means youu are higher ranked than ', '%.1f' % (100-(((given_user_position)/max(grouped_result)))*100), '% of users in this network!', sep='')
+	print('You are ', given_user_position, ' out of ', max(grouped_result) ,' for ',test_name, ' centrality. This means you are higher ranked than ', '%.1f' % (100-(((given_user_position)/max(grouped_result)))*100), '% of users in this network!', sep='')
 	
 	print("\nHere's how some verified public accounts scored")
 	previous_result = []
