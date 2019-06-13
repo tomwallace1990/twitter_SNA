@@ -16,6 +16,7 @@
 #	6. Interface - leave to Barrachd, I'll do backend
 #	9. Follower/following networks
 #	10. Get data from platfrom - set up query on alerter
+#	16. Gain control isn't working for people at the bottom (there are no handles below lowly ranked accounts which are below the gain value)
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
@@ -28,7 +29,7 @@
 #	11. Identify verified users
 #	14. Replace hashes in output
 #	12. Switch to be about given username
-#	15. Display grouped ranks rather than pure ordered scores becasue of invarience in scores (particularly in smaller networks)
+#	15. Display grouped ranks rather than pure ordered scores becasue of invarience in scores (particularly in smaller networks) - used percentiles instead
 
 #####Imports#####
 import pandas as pd
@@ -60,7 +61,7 @@ max_tweets = 2500 # How many tweets to request
 query = 'Extinction rebellion' # Topic of the request
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
-given_user = 'ajplus' # The input user to return results for #glasswyrm #ajplus
+given_user = 'nytimes' # The input user to return results for #glasswyrm #ajplus
 centrality_selection = ['degree', 'closeness', 'eigenvector'] #Options: 'degree', 'in degree', 'out degree', 'closeness', 'betweenness', 'eigenvector'
 random_depth = 0.05 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
 
@@ -157,15 +158,17 @@ def primevalidate (users, valid_dict, user_search_sleep):
 
 	return valid_dict
 
-def hasher (sender, receiver, hashing_type, valid_dict):
+def hasher (sender, receiver, hashing_type, valid_dict, given_user):
 	if hashing_type == 'valid':
 		sender = [hashlib.sha224(handle.encode()).hexdigest() if valid_dict.get(handle)!=True else handle for handle in sender]
 		receiver = [hashlib.sha224(handle.encode()).hexdigest() if valid_dict.get(handle)!=True else handle for handle in receiver]
 	elif hashing_type == 'full':
-		sender = [hashlib.sha224(handle.encode()).hexdigest() for handle in sender]
-		receiver = [hashlib.sha224(handle.encode()).hexdigest() for handle in receiver]
+		sender = [hashlib.sha224(handle.encode()).hexdigest() for handle in sender if handle !=given_user]
+		receiver = [hashlib.sha224(handle.encode()).hexdigest() for handle in receiver if handle !=given_user]
 	elif hashing_type == 'none':
 		pass
+
+	#Need to prevent it hashing the given user
 
 	return sender, receiver
 
@@ -215,71 +218,24 @@ def print_results_userlevel(result_list, id_list):
 	# This print function is a bit complex but basically it prints the sequential top 10, then the given user account, then 9 random accounts ranked lower than the user account - 20 results total
 	# That is unless the given user account is in the top 10, then it prints the top results in order until it hits the uder account, then it prints the user accout and then random accounts until it hits 20 in total
 
-	#PROBLEM the percentage of dividing group by total group must be wrong, need to work out how to calc the real one
-	#problem is different numbers of users in different groups - more in higher groups numbers
-
 	#Get the variables from the function head
 	result_centrality = result_list
 	index_list = id_list
 	
-	"""
-	#This block creates a list of bins and how many users are in each, the first 1 means only a single user as the top score, the 1071 at the end means the lowest score is shared by 1071 users
-	previ_vlaue=0
-	count=0
-	binned_count_list=[]
-	for value in result_centrality:
-		if value != previ_vlaue:
-			count = count + 1
-			binned_count_list.append(count)
-			previ_vlaue = value
-			count = 0
-		else:
-			count = count + 1
-	binned_count_list.append(count)
-	binned_count_list.pop(0) # this may not be robust, check what happens if there is a double at the start
-	
-	#Get a list of unique scores - this is important as many scores are the same which prevents proper sorting
-	test_results_unique = list(sorted(set(result_centrality), reverse=True))
-	
-	#for count,scroe in zip(binned_count_list,test_results_unique):
-	#	print(count, scroe)
-	print(binned_count_list)
-
-
-
-	#This block creates a dictonary of unique values and an incrimenting counter so the top unique score is 1, the second highest is 2, etc
-	dict_counter=0
-	test_results_unique_dict={}
-	for element in test_results_unique:
-		dict_counter=dict_counter+1
-		test_results_unique_dict.update({element:dict_counter})
-	print(test_results_unique_dict)
-	#Use the dictonary to create a list matching the user and results list but which contains each users grouped rank
-	grouped_result=[]
-	for handle,result in zip(index_list,result_centrality): # For each handle and score
-		for key,value in test_results_unique_dict.items(): # For each unique score in the dict
-			if result==key: # when the score in the origional list matches that in the dict, add the grouped score to a new list
-				grouped_result.append(value)
-	print(grouped_result)
-	"""
-	
 	#Ths block gets the slice position of the given account by incrimenting a counter until it finds the given user
-	given_user_counter=1
+	given_user_counter=0
 	for handle in index_list:
 		if handle!=given_user:
 			given_user_counter=given_user_counter+1
 		else:
 			break
 	
-
-	percentile_list = [stats.percentileofscore(result_centrality, item) for item in result_centrality]
-
-	
+	percentile_list = [stats.percentileofscore(result_centrality, item, kind='rank') for item in result_centrality]
 
 	#Get a list from 1 to the max used to show user position
 	counter_list = list(range(1,len(index_list)+1))
 
-	print('You are higher ranked than ', '%.1f' % percentile_list[given_user_counter], '% of users in this network!', sep='')
+	print('You are more prominent than (or at least as prominent as) ', '%.1f' % percentile_list[given_user_counter], '% of users in this network!', sep='')
 	
 	print("\nHere's how some verified public accounts scored")
 	previous_result = []
@@ -293,9 +249,9 @@ def print_results_userlevel(result_list, id_list):
 			result_count=result_count+1
 			previous_result.append(handle)
 		elif handle==given_user:
-			print('--------------------------------------------------------------------')
-			print('\n\tRank: ','%.1f' % position, '% \tScore: ', '%.4f' % result, '\tYou are here! (Your handle: ', handle, ')\n', sep='')
-			print('--------------------------------------------------------------------')
+			print('\n--------------------------------------------------------------------')
+			print('\tRank: ','%.1f' % position, '% \tScore: ', '%.4f' % result, '\tYou are here! (Your handle: ', handle, ')', sep='')
+			print('--------------------------------------------------------------------\n')
 			result_count=result_count+1
 			previous_result.append(handle)
 			given_user_pos = position
@@ -361,7 +317,7 @@ if given_user not in sender and given_user not in receiver:
 	quit()
 
 #Hash usernames
-sender, receiver = hasher(sender, receiver, hashing_type, valid_dict)
+sender, receiver = hasher(sender, receiver, hashing_type, valid_dict, given_user)
 
 #Create network
 network = spinnerette(sender, receiver, edgeweighting) # Get the network object from the constructor function
@@ -398,6 +354,11 @@ if edgeweighting == False:
 print('\n')
 
 #print(nx.average_clustering(network)) # this may need an edge weight value which will need to be calculated
+
+for thing in index_list:
+	if len(thing) < 56:
+		print(thing)
+
 
 #Graphing
 influencers_list = [item for sublist in influencers_list for item in sublist] # This flattens the list of influencers
