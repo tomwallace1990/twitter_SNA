@@ -16,6 +16,7 @@
 #	6. Interface - leave to Barrachd, I'll do backend
 #	9. Follower/following networks
 #	10. Get data from platfrom - set up query on alerter
+#	17. Isolate the largest component and give it to R - could also just viz network around given user, or given user and top 10 or something
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
@@ -48,6 +49,9 @@ import random
 import scipy.stats as stats
 import plotly.plotly as py
 import plotly.graph_objs as go
+import csv
+import subprocess
+import webbrowser
 
 #####Parameters and settings#####
 projectpath = './' # Set the root folder
@@ -58,7 +62,7 @@ random.seed(123456789)
 selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the egde list
 noresults = 10 # int. number of results to show
 removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
-edgeweighting = False # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
+edgeweighting = True # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
 user_search_sleep = 0 # How long to sleep for when looping over users and making API calls
 max_tweets = 2500 # How many tweets to request
 query = 'Extinction rebellion' # Topic of the request
@@ -171,6 +175,19 @@ def hasher (sender, receiver, hashing_type, valid_dict, given_user):
 		pass
 
 	return sender, receiver
+
+def edgecounter(senders, receivers, edgeweighting):
+	if edgeweighting == True:
+
+		dyads = [send+';'+rec for send,rec in zip(senders, receivers)]
+
+		edge_weights = []
+
+		for dyad in dyads:
+			number_of_dyads = re.findall(dyad, str(dyads))
+			edge_weights.append(len(number_of_dyads))
+
+		return edge_weights
 
 def spinnerette(senders, receivers, edgeweighting=False):
 	# This function takes in an edge list as a sender and receiver list (as produced by edgelister) and converts them into a network object from the library networkx
@@ -385,3 +402,83 @@ for node in nodelist:
 
 #nx.draw_networkx(network, alpha=0.7, nodelist=nodelist, labels=labeldicto, node_color=colour_list, node_size=size_list, font_size=12, edge_color='#a3a3a3') # Generate the graph
 #plt.show() # Display the graph
+
+#Graphing 2
+
+network_undir = network.to_undirected()
+
+#subgraphs = list(nx.connected_component_subgraphs(network_undir))
+set_largest_comp = max(nx.connected_components(network_undir), key=len)
+#set_largest_comp = nx.connected_components(network_undir)
+
+
+largest_comp_send = [handle for handle in sender if handle in set_largest_comp or handle in given_user]
+largest_comp_rec = [handle for handle in receiver if handle in set_largest_comp or handle in given_user]
+
+#nx.draw_networkx(subgraphs[0])
+#plt.show()
+
+edge_weights = edgecounter(largest_comp_send, largest_comp_rec, edgeweighting)
+
+nodes_exp = set(largest_comp_send+largest_comp_rec) # names including hashes
+nodes_exp_blanked = []
+for node in nodes_exp:
+	if len(node) > 50:
+		nodes_exp_blanked.append(' ')
+	else:
+		nodes_exp_blanked.append(node)
+nodes_exp = nodes_exp_blanked
+
+#group_exp = [1 for each in set(largest_comp_send+largest_comp_rec)] # group based on validated?
+group_exp=[]
+for each in set(largest_comp_send+largest_comp_rec):
+	if len(each) > 50:
+		group_exp.append(2)
+	elif each == given_user:
+		group_exp.append(3)
+	else:
+		group_exp.append(1)
+
+size_exp = [10 for each in set(largest_comp_send+largest_comp_rec)] # size based on percentile rank?
+
+
+
+export_data = zip(nodes_exp,group_exp,size_exp)
+output = './Data/datNodes.csv'
+with open(output, 'w', encoding='1252', errors='replace', newline='') as file:
+	wr = csv.writer(file)
+	wr.writerow(('name', 'group', 'size'))
+	wr.writerows(export_data)
+file.close()
+
+ref_dic={}
+count=0
+for each in set(largest_comp_send+largest_comp_rec): # Give each handle a unique number
+	ref_dic.update({each:count})
+	count=count+1
+
+send_exp = []
+rec_exp = []
+
+for send,rec in zip(largest_comp_send,largest_comp_rec): # Replace the handles with numbers for R
+	send_exp.append(ref_dic.get(send)) 
+	rec_exp.append(ref_dic.get(rec))
+
+#value_exp = [1 for each in send_exp] # value based on edge weight - will need to calc it
+value_exp = edge_weights # value by edge weights
+
+export_data = zip(send_exp,rec_exp,value_exp)
+output = './Data/datLinks.csv'
+with open(output, 'w', encoding='1252', errors='replace', newline='') as file:
+	wr = csv.writer(file)
+	wr.writerow(('source', 'target', 'value'))
+	wr.writerows(export_data)
+file.close()
+
+#R graph
+retcode = subprocess.call(['C:/Program Files/R/R-3.6.0/bin/Rscript.exe', '--vanilla', 'C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/GenerateNetwork.R'], shell=True)
+
+new = 2 # open in a new tab
+
+url = "C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/Network.html"
+webbrowser.open(url,new=new)
