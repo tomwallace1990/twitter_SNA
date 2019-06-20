@@ -62,13 +62,13 @@ random.seed(123456789)
 selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the egde list
 noresults = 10 # int. number of results to show
 removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
-edgeweighting = True # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
-user_search_sleep = 0 # How long to sleep for when looping over users and making API calls
-max_tweets = 2500 # How many tweets to request
-query = 'Extinction rebellion' # Topic of the request
+edgeweighting_toggle = True # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
+user_search_sleep = 0 # How long to sleep for when looping over users and making API calls - it will auto rate limmit
+max_tweets = 1500 # How many tweets to request
+query = 'ClimateEmergency' # Topic of the request
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
-given_user = 'ajplus' # The input user to return results for #glasswyrm #ajplus #nytimes
+given_user = 'greenpeace' # The input user to return results for #glasswyrm #ajplus #nytimes
 random_depth_gain = 500 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
 
 #####Functions#####
@@ -91,7 +91,7 @@ def athenticate(tokenpath):
 
 def searchtwit(query, max_tweets, allowRTs):
 	
-	print('Searcing twitter for', max_tweets, 'tweets on the topic of', query)
+	print('Searcing twitter for ', max_tweets, ' tweets about "', query, '". Please wait...', sep='')
 	searched_tweets = [status for status in tweepy.Cursor(api.search, q=query, lang='en').items(max_tweets)]
 	
 	filteredlist=[]
@@ -146,14 +146,16 @@ def prevalidate (valid_dict, searched_tweets):
 
 	for tweet in searched_tweets:
 		valid_dict.update({tweet.user.screen_name.lower() : tweet.user.verified})
-		if re.match('RT @', tweet.text) is not None:
-			valid_dict.update({tweet.retweeted_status.user.screen_name.lower() : tweet.retweeted_status.user.verified})
-
+		try:
+			if re.match('RT @', tweet.text) is not None:
+				valid_dict.update({tweet.retweeted_status.user.screen_name.lower() : tweet.retweeted_status.user.verified})
+		except:
+			pass
 	return valid_dict
 
 def primevalidate (users, valid_dict, user_search_sleep):
 
-	print('Making API calls for ', len(users), ' users. Please wait.', sep='')
+	print('Making API calls for ', len(users), ' users. Please wait...', sep='')
 	for user in users:
 		try:
 			userinfo = api.get_user(screen_name=user)	
@@ -176,8 +178,8 @@ def hasher (sender, receiver, hashing_type, valid_dict, given_user):
 
 	return sender, receiver
 
-def edgecounter(senders, receivers, edgeweighting):
-	if edgeweighting == True:
+def edgecounter(senders, receivers, edgeweighting_toggle):
+	if edgeweighting_toggle == True:
 
 		dyads = [send+';'+rec for send,rec in zip(senders, receivers)]
 
@@ -189,10 +191,10 @@ def edgecounter(senders, receivers, edgeweighting):
 
 		return edge_weights
 
-def spinnerette(senders, receivers, edgeweighting=False):
+def spinnerette(senders, receivers, edgeweighting_toggle=False):
 	# This function takes in an edge list as a sender and receiver list (as produced by edgelister) and converts them into a network object from the library networkx
 
-	if edgeweighting == True:
+	if edgeweighting_toggle == True:
 		network = nx.MultiDiGraph() # Initalise the network
 	else:
 		network = nx.DiGraph() # Initalise the network
@@ -285,6 +287,107 @@ def print_results_userlevel(result_list, id_list, random_depth_gain):
 			if result_count > 20:
 				break
 
+def simplegraphing(sender,receiver, influencers_list):
+	influencers_list = [item for sublist in influencers_list for item in sublist] # This flattens the list of influencers
+	influencers_list = list(dict.fromkeys(influencers_list)) # This removes any duplicates
+
+	influencers_list=[given_user]
+
+	labeldicto={} # These 3 lines convert the list into a dictonary which is used in the graphing below to label the top influencers. Any account to appear in the top 5 of any of the metrics will have a label.
+	for account in influencers_list:
+		labeldicto.update({str(account):str(account[:15])}) # Only display the first 15 chars of the name. Twitter handles can only be 15 chars long, but if using a hash this makes the graph more readable
+
+	nodelist = (list(set(sender+receiver)))
+
+	colour_list=[]
+	size_list=[]
+	for node in nodelist:
+		if node==given_user:
+			colour_list.append('#FF0000')
+			size_list.append(250)
+		else:
+			colour_list.append('#23b7ce')
+			size_list.append(35)
+
+	nx.draw_networkx(network, alpha=0.7, nodelist=nodelist, labels=labeldicto, node_color=colour_list, node_size=size_list, font_size=12, edge_color='#a3a3a3') # Generate the graph
+	plt.show() # Display the graph
+
+def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
+	network_undir = network.to_undirected()
+
+	#subgraphs = list(nx.connected_component_subgraphs(network_undir))
+	set_largest_comp = max(nx.connected_components(network_undir), key=len)
+	#set_largest_comp = nx.connected_components(network_undir)
+
+
+	largest_comp_send = [handle for handle in sender if handle in set_largest_comp or handle in given_user]
+	largest_comp_rec = [handle for handle in receiver if handle in set_largest_comp or handle in given_user]
+
+	edge_weights = edgecounter(largest_comp_send, largest_comp_rec, edgeweighting_toggle)
+
+	unique_set = set(largest_comp_send+largest_comp_rec)
+
+	nodes_exp = unique_set # all handles including hashed ones
+	nodes_exp_blanked = []
+	for node in nodes_exp: # This block writes an empty space for hashes users so they don't show up on the netowrk graph
+		if len(node) > 50:
+			nodes_exp_blanked.append(' ')
+		else:
+			nodes_exp_blanked.append(node) # authenticated users can show up
+	nodes_exp = nodes_exp_blanked
+
+	#group_exp = [1 for each in unique_set] # this just sets group to 1 for all
+	group_exp=[]
+	for each in unique_set: # This sets the user groups, 2 for hashed users, 1 for valid, and 3 for the given user
+		if len(each) > 50:
+			group_exp.append(2)
+		elif each == given_user:
+			group_exp.append(3)
+		else:
+			group_exp.append(1)
+
+	size_exp = [10 for each in unique_set] # size based on percentile rank?
+
+	export_data = zip(nodes_exp,group_exp,size_exp)
+	output = './Data/datNodes.csv' # This writes the node data out
+	with open(output, 'w', encoding='1252', errors='replace', newline='') as file:
+		wr = csv.writer(file)
+		wr.writerow(('name', 'group', 'size'))
+		wr.writerows(export_data)
+	file.close()
+
+	ref_dic={}
+	count=0
+	for each in unique_set: # Give each handle a unique number
+		ref_dic.update({each:count})
+		count=count+1
+
+	send_exp = []
+	rec_exp = []
+
+	for send,rec in zip(largest_comp_send,largest_comp_rec): # Replace the handles with numbers for R
+		send_exp.append(ref_dic.get(send)) 
+		rec_exp.append(ref_dic.get(rec))
+
+	#value_exp = [1 for each in send_exp] # value based on edge weight - will need to calc it
+	value_exp = edge_weights # value by edge weights, from function
+
+	export_data = zip(send_exp,rec_exp,value_exp)
+	output = './Data/datLinks.csv' # Write the links data out
+	with open(output, 'w', encoding='1252', errors='replace', newline='') as file:
+		wr = csv.writer(file)
+		wr.writerow(('source', 'target', 'value'))
+		wr.writerows(export_data)
+	file.close()
+
+	#R graph - call the R file
+	retcode = subprocess.call(['C:/Program Files/R/R-3.6.0/bin/Rscript.exe', '--vanilla', 'C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/GenerateNetwork.R'], shell=True)
+
+	#Open the HTML graph R generates
+	new = 2 # open in a new tab
+	url = "C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/Network.html"
+	webbrowser.open(url,new=new)
+
 #####Main#####
 #Authenticate via public API
 #api = athenticate(tokenpath)
@@ -343,7 +446,7 @@ if given_user not in sender and given_user not in receiver:
 sender, receiver = hasher(sender, receiver, hashing_type, valid_dict, given_user)
 
 #Create network
-network = spinnerette(sender, receiver, edgeweighting) # Get the network object from the constructor function
+network = spinnerette(sender, receiver, edgeweighting_toggle) # Get the network object from the constructor function
 #print(nx.info(network)) # Print network description for diganostic purposes
 
 #Get node level metrics
@@ -368,117 +471,18 @@ print('Number of nodes (accounts):',nx.number_of_nodes(network))
 print('Number of edges (mentions between accounts):',nx.number_of_edges(network))
 print('Network density (% of possible edges which are extant): ',(nx.density(network))*100,'%',sep='') # this is in % so 100 times higher than standard density
 print('Allow retweets:', str(allowRTs))
-print('Allow repeated contact:', str(edgeweighting))
+print('Allow repeated contact:', str(edgeweighting_toggle))
 print('Remove duplicate tweets:', str(removedups))
 print('Allow self loops:', str(selfloop))
 print('Number of self loop edges:',nx.number_of_selfloops(network)) # This can be !0 even when the toggle is set to false as sometimes accounts retweet or mention themselves.
-if edgeweighting == False:
+if edgeweighting_toggle == False:
 	print('Transitivity (% of possible triangles which are extant):',nx.transitivity(network))
 print('\n')
 
 #print(nx.average_clustering(network)) # this may need an edge weight value which will need to be calculated
 
-#Graphing
-influencers_list = [item for sublist in influencers_list for item in sublist] # This flattens the list of influencers
-influencers_list = list(dict.fromkeys(influencers_list)) # This removes any duplicates
+#Simplistic Graphing - not great
+#simplegraphing(sender,receiver, influencers_list)
 
-influencers_list=[given_user]
-
-labeldicto={} # These 3 lines convert the list into a dictonary which is used in the graphing below to label the top influencers. Any account to appear in the top 5 of any of the metrics will have a label.
-for account in influencers_list:
-	labeldicto.update({str(account):str(account[:15])}) # Only display the first 15 chars of the name. Twitter handles can only be 15 chars long, but if using a hash this makes the graph more readable
-
-nodelist = (list(set(sender+receiver)))
-
-colour_list=[]
-size_list=[]
-for node in nodelist:
-	if node==given_user:
-		colour_list.append('#FF0000')
-		size_list.append(250)
-	else:
-		colour_list.append('#23b7ce')
-		size_list.append(35)
-
-#nx.draw_networkx(network, alpha=0.7, nodelist=nodelist, labels=labeldicto, node_color=colour_list, node_size=size_list, font_size=12, edge_color='#a3a3a3') # Generate the graph
-#plt.show() # Display the graph
-
-#Graphing 2
-
-network_undir = network.to_undirected()
-
-#subgraphs = list(nx.connected_component_subgraphs(network_undir))
-set_largest_comp = max(nx.connected_components(network_undir), key=len)
-#set_largest_comp = nx.connected_components(network_undir)
-
-
-largest_comp_send = [handle for handle in sender if handle in set_largest_comp or handle in given_user]
-largest_comp_rec = [handle for handle in receiver if handle in set_largest_comp or handle in given_user]
-
-#nx.draw_networkx(subgraphs[0])
-#plt.show()
-
-edge_weights = edgecounter(largest_comp_send, largest_comp_rec, edgeweighting)
-
-nodes_exp = set(largest_comp_send+largest_comp_rec) # names including hashes
-nodes_exp_blanked = []
-for node in nodes_exp:
-	if len(node) > 50:
-		nodes_exp_blanked.append(' ')
-	else:
-		nodes_exp_blanked.append(node)
-nodes_exp = nodes_exp_blanked
-
-#group_exp = [1 for each in set(largest_comp_send+largest_comp_rec)] # group based on validated?
-group_exp=[]
-for each in set(largest_comp_send+largest_comp_rec):
-	if len(each) > 50:
-		group_exp.append(2)
-	elif each == given_user:
-		group_exp.append(3)
-	else:
-		group_exp.append(1)
-
-size_exp = [10 for each in set(largest_comp_send+largest_comp_rec)] # size based on percentile rank?
-
-
-
-export_data = zip(nodes_exp,group_exp,size_exp)
-output = './Data/datNodes.csv'
-with open(output, 'w', encoding='1252', errors='replace', newline='') as file:
-	wr = csv.writer(file)
-	wr.writerow(('name', 'group', 'size'))
-	wr.writerows(export_data)
-file.close()
-
-ref_dic={}
-count=0
-for each in set(largest_comp_send+largest_comp_rec): # Give each handle a unique number
-	ref_dic.update({each:count})
-	count=count+1
-
-send_exp = []
-rec_exp = []
-
-for send,rec in zip(largest_comp_send,largest_comp_rec): # Replace the handles with numbers for R
-	send_exp.append(ref_dic.get(send)) 
-	rec_exp.append(ref_dic.get(rec))
-
-#value_exp = [1 for each in send_exp] # value based on edge weight - will need to calc it
-value_exp = edge_weights # value by edge weights
-
-export_data = zip(send_exp,rec_exp,value_exp)
-output = './Data/datLinks.csv'
-with open(output, 'w', encoding='1252', errors='replace', newline='') as file:
-	wr = csv.writer(file)
-	wr.writerow(('source', 'target', 'value'))
-	wr.writerows(export_data)
-file.close()
-
-#R graph
-retcode = subprocess.call(['C:/Program Files/R/R-3.6.0/bin/Rscript.exe', '--vanilla', 'C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/GenerateNetwork.R'], shell=True)
-
-new = 2 # open in a new tab
-
-url = "C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/Network.html"
-webbrowser.open(url,new=new)
+#HTML interactive Graphing 2 - Snazy but not very customizable
+htmlgraph(network, sender, receiver, edgeweighting_toggle)
