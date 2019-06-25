@@ -3,6 +3,8 @@
 #Created 20/06/2019
 #Description: This finds topics a given user is tweeting about
 
+#I could see how this could be tied into stuff Alerter does by showing how many recent tweets there are for each topic the script suggests.
+
 #####Imports#####
 import tweepy
 import json
@@ -92,7 +94,17 @@ def top_hashtags(tweets):
 def topic(tweets):
 	#https://ourcodingclub.github.io/2018/12/10/topic-modelling-python.html
 
-	tweets = list(map(lambda x :x.full_text, tweets))
+	tweets_list=[]
+	for tweet in tweets:
+		if 'RT @' in tweet.full_text: # IF they are RT get the non tructated
+			try:
+				tweet = tweet.retweeted_status.full_text
+			except:
+				tweet = tweet.full_text
+		else:
+			tweet = tweet.full_text
+		tweets_list.append(tweet)
+	tweets=tweets_list
 	tweets = list(map(lambda x :x.lower(), tweets))
 
 	for each in ['http\S+','bit.ly/\S+','rt @\w+:', '#\w+','[^\w\d\s]','htt', '\d+']:
@@ -155,18 +167,17 @@ def topic(tweets):
 	""" 
 
 #####Main#####
-#api = athenticate(tokenpath)
-#tweets = api.user_timeline(screen_name=given_user,count=no_of_tweets,tweet_mode='extended')
+api = athenticate(tokenpath)
+tweets = api.user_timeline(screen_name=given_user,count=no_of_tweets,tweet_mode='extended')
 
 #pickle.dump(tweets, open( './TOPICtweets', 'wb'))
-tweets = pickle.load(open( './TOPICtweets', 'rb'))
+#tweets = pickle.load(open( './TOPICtweets', 'rb'))
 
 sincewhen = tweets[-1].created_at
 print('\nBased on the last ',len(tweets),' tweets sent by ',given_user, ', this script returns the top topics and hashtags the user is active in.', sep='')
 print('These topics and hashtags may suggest networks the user is active in and may wish to search for.')
 print('The oldest tweet was sent at:', sincewhen)
 
-topic(tweets)
-
 top_hashtags(tweets)
+topic(tweets)
 

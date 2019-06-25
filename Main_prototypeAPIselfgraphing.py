@@ -16,7 +16,8 @@
 #	6. Interface - leave to Barrachd, I'll do backend
 #	9. Follower/following networks
 #	10. Get data from platfrom - set up query on alerter
-#	17. Isolate the largest component and give it to R - could also just viz network around given user, or given user and top 10 or something
+#	19. Ian suggestion - grab network at different time points and compare user position change
+#	20. Add cheating - collect all of users tweets which fit the serach term and add them to the natural search (removing duplicates)
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
@@ -31,7 +32,9 @@
 #	12. Switch to be about given username
 #	15. Display grouped ranks rather than pure ordered scores becasue of invarience in scores (particularly in smaller networks) - used percentiles instead
 #	16. Gain control isn't working for people at the bottom (there are no handles below lowly ranked accounts which are below the gain value)
-
+#	17. Isolate the largest component and give it to R - could also just viz network around given user, or given user and top 10 or something
+#	18. Ian suggestion - Sentiment analysis on the corpus to work out if the given user is positive or negative, or topic modelling - would have to sort inbound or outbound
+#	21. Switch to full tweet objects to prevent truncating
 
 #####Imports#####
 import pandas as pd
@@ -52,6 +55,7 @@ import plotly.graph_objs as go
 import csv
 import subprocess
 import webbrowser
+from textblob import TextBlob 
 
 #####Parameters and settings#####
 projectpath = './' # Set the root folder
@@ -63,13 +67,14 @@ selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets
 noresults = 10 # int. number of results to show
 removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
 edgeweighting_toggle = True # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
-user_search_sleep = 0 # How long to sleep for when looping over users and making API calls - it will auto rate limmit
-max_tweets = 1500 # How many tweets to request
-query = 'ClimateEmergency' # Topic of the request
+max_tweets = 1000 # How many tweets to request
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
-given_user = 'greenpeace' # The input user to return results for #glasswyrm #ajplus #nytimes
 random_depth_gain = 500 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
+use_pickle_data = True
+
+query = '#ClimateEmergency' # Topic of the request
+given_user = 'exxonmobil' # The input user to return results for
 
 #####Functions#####
 
@@ -92,7 +97,7 @@ def athenticate(tokenpath):
 def searchtwit(query, max_tweets, allowRTs):
 	
 	print('Searcing twitter for ', max_tweets, ' tweets about "', query, '". Please wait...', sep='')
-	searched_tweets = [status for status in tweepy.Cursor(api.search, q=query, lang='en').items(max_tweets)]
+	searched_tweets = [status for status in tweepy.Cursor(api.search, q=query, lang='en',tweet_mode='extended').items(max_tweets)]
 	
 	filteredlist=[]
 	if allowRTs == False: # this version of the searchtwit function can filter out retweets if required
@@ -102,24 +107,36 @@ def searchtwit(query, max_tweets, allowRTs):
 		searched_tweets = filteredlist # replace origional list with filtered list
 
 	tweet_author = [tweet.user.screen_name for tweet in searched_tweets] # get a list of just the authors of each tweet
-	tweet_text = [tweet.text for tweet in searched_tweets] # get a list of just the text of each tweet
+	#tweet_text = [tweet.text for tweet in searched_tweets] # get a list of just the text of each tweet
+	tweet_text=[]
+	for tweet in searched_tweets:
+		if 'RT @' in tweet.full_text: # IF they are RT get the non tructated
+			try:
+				tweet = tweet.retweeted_status.full_text
+			except:
+				tweet = tweet.full_text
+		else:
+			tweet = tweet.full_text
+		tweet_text.append(tweet)
 
 	return tweet_author, tweet_text, searched_tweets
 
-def edgelister(authors, tweets, selfloop=False, removedups=False, sav_path=None): 
+def removeduplicates(tweets):
+	urlmatch = re.compile(r'(https|http)://([^\s]+)')
+	tweets = [re.sub(r'(https|http)://([^\s]+)', 'URL', tweet) for tweet in tweets]
+	lentweet = len(tweets)
+	tweets = set(tweets)
+	#print('N.B.',lentweet-len(tweets), 'of',lentweet ,'tweets removed as duplicates.')
+
+	return tweets
+
+def edgelister(authors, tweets, selfloop=False, removedups=True, sav_path=None): 
 	# This function takes tweet objects and generates an edgelist, which is a pair of equal length lists showing the sender and receiver of each tweet which contains one or more '@'
 	# Where there is more than one '@' in a tweet an equal number of lines is created in the edge list
 	# This function expects a list of string handles and a matching list of tweet text.
 	# Example: the tweet 'hi, this is a test @test @testing' by account tomw would result in the lists - [tomw, tomw] [test, testing] 
 
 	sender, receiver=[], []
-
-	if removedups == True:
-		print(len(tweets))
-		urlmatch = re.compile(r'(https|http)://([^\s]+)')
-		tweets = [re.sub(r'(https|http)://([^\s]+)', 'URL', tweet) for tweet in tweets]
-		tweets = list(dict.fromkeys(tweets))
-		print(len(tweets))
 
 	for tweet, author in zip(tweets, authors): # Need to do a zip loop to keep author linked to the right tweet
 		links = re.findall(r'(?<=@)\w+', tweet) # Use regex to find the block of characters folliwng the @ symbol which is the receiving handle
@@ -153,7 +170,7 @@ def prevalidate (valid_dict, searched_tweets):
 			pass
 	return valid_dict
 
-def primevalidate (users, valid_dict, user_search_sleep):
+def primevalidate (users, valid_dict):
 
 	print('Making API calls for ', len(users), ' users. Please wait...', sep='')
 	for user in users:
@@ -162,8 +179,6 @@ def primevalidate (users, valid_dict, user_search_sleep):
 			valid_dict.update({userinfo.screen_name.lower() : userinfo.verified})
 		except:
 			valid_dict.update({user : None})
-		sleep(user_search_sleep)
-
 	return valid_dict
 
 def hasher (sender, receiver, hashing_type, valid_dict, given_user):
@@ -388,21 +403,62 @@ def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
 	url = "C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/Network.html"
 	webbrowser.open(url,new=new)
 
-#####Main#####
-#Authenticate via public API
-#api = athenticate(tokenpath)
+def sentiment_analysis(corpus,removedups):
+	if removedups==True:
+		corpus = removeduplicates(corpus) # Remove duplicates
 
-#Grab tweets on given topic from API. Account is list of senders, corpus is matching list of tweet text, searched_tweets is matching list of the full tweet objects
-#account, corpus, searched_tweets = searchtwit(query, max_tweets, allowRTs)
-#dump_data = zip(account, corpus, searched_tweets)
-#pickle.dump(dump_data, open( './tweets', 'wb'))
+	sentiment_scores=[]
+	for tweet in corpus:
+		tweet = re.sub('@\w+|^rt |[^a-z| ]|(http|ftp|https)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?','',tweet)
+		sentiment_scores.append(TextBlob(tweet).sentiment.polarity)
 
-dump_data = pickle.load(open( './tweets', 'rb'))
-account, corpus, searched_tweets = zip(*dump_data)
+	sentiment_scores_no_zero = [value for value in sentiment_scores if value !=0] # remove neutral sentiment
+	ave_sentiment = sum(sentiment_scores_no_zero)/float(len(sentiment_scores_no_zero))
+	number_of_tweets = len(corpus)
+	ave_sentiment = float(str(ave_sentiment)[:4])
+
+	dataframe_data = zip(sentiment_scores,corpus)
+	df = pd.DataFrame(dataframe_data, columns=['Score','Tweet'])
+	#need to generate an indiviudal measure of deviation (IQR) on score and sort decenting and pic the top to get close to the averge tweet
+	df.sort_values(by=['Score'],ascending=False, inplace=True)
+	print(df)
+	example=0
+
+	return ave_sentiment, number_of_tweets, example
+
+def english_sentiment(sentiment_score):
+	if sentiment_score <= -0.5:
+		sentiment_in_english = 'very negative'
+	elif sentiment_score > -0.5 and sentiment_score < 0:
+		sentiment_in_english = 'negative'
+	elif sentiment_score > 0 and sentiment_score < 0.5:
+		sentiment_in_english = 'positive'
+	elif sentiment_score >= 0.5:
+		sentiment_in_english = 'very positive'
+
+	return sentiment_in_english
+
+##############################################################################
+##################################Main########################################
+##############################################################################
+if use_pickle_data == False:
+	#Authenticate via public API
+	api = athenticate(tokenpath)
+
+	#Grab tweets on given topic from API. Account is list of senders, corpus is matching list of tweet text, searched_tweets is matching list of the full tweet objects
+	account, corpus, searched_tweets = searchtwit(query, max_tweets, allowRTs)
+	dump_data = zip(account, corpus, searched_tweets)
+	pickle.dump(dump_data, open( './tweets', 'wb'))
+else:
+	dump_data = pickle.load(open( './tweets', 'rb'))
+	account, corpus, searched_tweets = zip(*dump_data)
 
 #Case conversion
 account = [text.lower() for text in account]
 corpus = [text.lower() for text in corpus]
+
+if removedups == True:
+	corpus = removeduplicates(corpus)
 
 #Create edge list
 sender, receiver = edgelister(account, corpus, selfloop, removedups) # Call the edgelister function to convert the authors and tweets into an edge list
@@ -424,23 +480,26 @@ for user in receiver: # All senders are in the dictionary so just loop through r
 		unverified_users.append(user) # if the user isnt in the dict then add them to the new list
 unverified_users = list(dict.fromkeys(unverified_users)) # Filter the new list for duplicates
 
-#valid_dict = primevalidate(unverified_users, valid_dict, user_search_sleep) # Update the dictonary with the extra users, this should be the same length as the number of nodes in the network
-#pickle.dump(valid_dict, open( './validdict', 'wb'))
-valid_dict = pickle.load(open( './validdict', 'rb'))
+if use_pickle_data == False:
+	valid_dict = primevalidate(unverified_users, valid_dict) # Update the dictonary with the extra users, this should be the same length as the number of nodes in the networkpickle.dump(valid_dict, open( './validdict', 'wb'))
+	pickle.dump(valid_dict, open( './validdict', 'wb'))
+else:
+	valid_dict = pickle.load(open( './validdict', 'rb'))
+
+#Check given account is in network
+if given_user not in sender and given_user not in receiver:
+	print('>>> WARN: The given handle is not in the network which was collected, try altering query <<<\nExiting.')
+	quit()
 
 #Remove invalid user names
 invalid = [handle for handle in (list(set(sender+receiver))) if valid_dict.get(handle)==None] # It is possible to tweet at an invalid handle, these are picked up as part of primevalidate and removed here (only handles in primevalidate are picked up)
 
 for send, rec in zip(sender,receiver): # for each dyadic edge
 	for inval in invalid: # for each invalid handle
-		if inval in send or inval in rec: #if either part of the dyad is invalid remove the whole dyad
+		if inval in send: #if either part of the dyad is invalid remove the whole dyad
 			sender.remove(send)
+		if inval in rec:
 			receiver.remove(rec)
-
-#Check given account is in network
-if given_user not in sender and given_user not in receiver:
-	print('>>> WARN: The given handle is not in the network which was collected, try altering query <<<\nExiting.')
-	quit()
 
 #Hash usernames
 sender, receiver = hasher(sender, receiver, hashing_type, valid_dict, given_user)
@@ -485,4 +544,17 @@ print('\n')
 #simplegraphing(sender,receiver, influencers_list)
 
 #HTML interactive Graphing 2 - Snazy but not very customizable
-htmlgraph(network, sender, receiver, edgeweighting_toggle)
+#htmlgraph(network, sender, receiver, edgeweighting_toggle)
+
+#Sentiment analysis
+#Network overall
+print('Sentiment analysis\n-------------------------')
+sentiment, number_of_tweets, example = sentiment_analysis(corpus, removedups) # get the sentiment
+print('The sentiment for the whole network is:', sentiment, 'based on', number_of_tweets, 'tweets.')
+print('This indicates', english_sentiment(sentiment),'sentiment.\n')
+
+#Mentions of given user
+#corpus = [tweet for tweet in corpus if given_user in tweet] # keep just tweets about the given user
+#sentiment_user, number_of_tweets, example = sentiment_analysis(corpus, removedups) # get the sentiment
+#print('The sentiment for mentions of the given user is:', sentiment_user, 'based on', number_of_tweets, 'tweets.')
+#print('This indicates', english_sentiment(sentiment_user),'sentiment.\n')
