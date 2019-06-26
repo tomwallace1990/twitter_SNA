@@ -5,6 +5,8 @@
 
 #I could see how this could be tied into stuff Alerter does by showing how many recent tweets there are for each topic the script suggests.
 
+# What are people saying about greenpeace 'about @handle'
+
 #####Imports#####
 import tweepy
 import json
