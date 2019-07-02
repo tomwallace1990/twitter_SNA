@@ -11,13 +11,12 @@
 
 #To do:
 
-#	3. Spike detection - automate selection of preiod
-#	5. Rolling data input - last 3 days for example
+#	3. Spike detection - automate selection of preiod, part of rolling input
+#	5. Rolling data input - last 3 days for example, import, process dates, variable to set slice period
 #	6. Interface - leave to Barrachd, I'll do backend
 #	9. Follower/following networks
 #	10. Get data from platfrom - set up query on alerter
-#	19. Ian suggestion - grab network at different time points and compare user position change
-#	20. Add cheating - collect all of users tweets which fit the serach term and add them to the natural search (removing duplicates)
+#	19. Ian suggestion - grab network at different time points and compare user position change, extension of 5.
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
@@ -35,6 +34,7 @@
 #	17. Isolate the largest component and give it to R - could also just viz network around given user, or given user and top 10 or something
 #	18. Ian suggestion - Sentiment analysis on the corpus to work out if the given user is positive or negative, or topic modelling - would have to sort inbound or outbound
 #	21. Switch to full tweet objects to prevent truncating
+#	20. Add cheating - collect all of users tweets which fit the serach term and add them to the natural search (removing duplicates and tweets older than oldest search)
 
 #####Imports#####
 import pandas as pd
@@ -70,7 +70,7 @@ edgeweighting_toggle = True # bool. This set whether to allow repeated contact b
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 random_depth_gain = 500 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
-max_tweets = 500 # How many tweets to request
+max_tweets = 2000 # How many tweets to request
 use_pickle_data = False
 get_user_activity = True
 
@@ -95,8 +95,44 @@ def athenticate(tokenpath):
 	api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
 	return api
 
-def searchtwit(query, max_tweets, allowRTs,get_user_activity):
+def getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet):
+	print('Searching twitter for tweets from the given user. Please wait...')
+	given_user_tweets = api.user_timeline(screen_name=given_user,count=250,tweet_mode='extended')
+
+	given_user_tweets = [tweet for tweet in given_user_tweets if tweet.id>oldest_tweet] # This filters out tweets from the given user that are older than the oldest tweet collected in the main search
 	
+	given_user_tweets = [tweet for tweet in given_user_tweets if tweet.id not in searched_tweets] # Duplicate checking, filter any tweet which is already in searched tweets
+
+	given_user_author = [given_user for tweet in given_user_tweets]
+
+	given_user_text=[]
+	for user_tweet in given_user_tweets:
+		if 'RT @' in user_tweet.full_text: # IF they are RT get the non tructated
+			try:
+				user_tweet = user_tweet.retweeted_status.full_text
+			except:
+				user_tweet = user_tweet.full_text
+		else:
+			user_tweet = user_tweet.full_text
+		given_user_text.append(user_tweet)
+	
+	#This block filters the given user tweets so only ones relevant to the query are kept - this can be sensitive to the formatting of the query
+	given_user_tweets_filtered=[]
+	given_user_author_filtered=[]
+	given_user_text_filtered=[]
+	for tweet,author,text in zip(given_user_tweets,given_user_author,given_user_text):
+		if query.lower() in text.lower(): # force bother lower case to increase compatability
+			given_user_tweets_filtered.append(tweet)
+			given_user_author_filtered.append(author)
+			given_user_text_filtered.append(text)
+
+	searched_tweets.extend(given_user_tweets_filtered)
+	tweet_author.extend(given_user_author_filtered)
+	tweet_text.extend(given_user_text_filtered)
+
+	return tweet_author, tweet_text, searched_tweets #return the filtered tweets for the given user - they still may get kicked out if none of theses tweets have an @
+
+def searchtwit(max_tweets, allowRTs,get_user_activity):
 	print('Searcing twitter for ', max_tweets, ' tweets about "', query, '". Please wait...', sep='')
 	searched_tweets = [status for status in tweepy.Cursor(api.search, q=query, lang='en',tweet_mode='extended').items(max_tweets)]
 	
@@ -119,41 +155,13 @@ def searchtwit(query, max_tweets, allowRTs,get_user_activity):
 		else:
 			tweet = tweet.full_text
 		tweet_text.append(tweet)
-
+	
 	if get_user_activity == True: # get tweets from users timeline and append to the end of the authors, text, and object list
-		given_user_tweets = api.user_timeline(screen_name=given_user,count=100,tweet_mode='extended')
-		
-		for tweet in given_user_tweets:
-			if query in tweet.full_text:
-				print('yes')
-
-		given_user_author = [given_user for tweet in given_user_tweets]
-
-		given_user_text=[]
-		for user_tweet in given_user_tweets:
-			if 'RT @' in user_tweet.full_text: # IF they are RT get the non tructated
-				try:
-					user_tweet = user_tweet.retweeted_status.full_text
-				except:
-					user_tweet = user_tweet.full_text
-			else:
-				user_tweet = user_tweet.full_text
-			given_user_text.append(user_tweet)
-		
-		#This block filters the given user tweets so only ones relevant to the query are kept - this can be sensitive to the formatting of the query
-		given_user_tweets_filtered=[]
-		given_user_author_filtered=[]
-		given_user_text_filtered=[]
-		for tweet,author,text in zip(given_user_tweets,given_user_author,given_user_text):
-			if query.lower() in text.lower(): # force bother lower case to increase compatability
-				given_user_tweets_filtered.append(tweet)
-				given_user_author_filtered.append(author)
-				given_user_text_filtered.append(text)
-
-		searched_tweets.extend(given_user_tweets_filtered)
-		tweet_author.extend(given_user_author_filtered)
-		tweet_text.extend(given_user_text_filtered)
-
+		id_list = [tweet.id for tweet in searched_tweets]
+		id_list.sort(reverse = False)
+		oldest_tweet = id_list[0] 
+		tweet_author, tweet_text, searched_tweets = getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet)
+	
 	return tweet_author, tweet_text, searched_tweets
 
 def removeduplicates(tweets):
@@ -466,9 +474,11 @@ def english_sentiment(sentiment_score):
 	#
 	if sentiment_score <= -0.5:
 		sentiment_in_english = 'very negative'
-	elif sentiment_score > -0.5 and sentiment_score < 0:
+	elif sentiment_score > -0.5 and sentiment_score <= -0.25:
 		sentiment_in_english = 'negative'
-	elif sentiment_score > 0 and sentiment_score < 0.5:
+	elif sentiment_score >-0.25 and sentiment_score <0.25:
+		sentiment_in_english = 'neutral'
+	elif sentiment_score >= 0.25 and sentiment_score < 0.5:
 		sentiment_in_english = 'positive'
 	elif sentiment_score >= 0.5:
 		sentiment_in_english = 'very positive'
@@ -483,7 +493,7 @@ if use_pickle_data == False:
 	api = athenticate(tokenpath)
 
 	#Grab tweets on given topic from API. Account is list of senders, corpus is matching list of tweet text, searched_tweets is matching list of the full tweet objects
-	account, corpus, searched_tweets = searchtwit(query, max_tweets, allowRTs,get_user_activity)
+	account, corpus, searched_tweets = searchtwit(max_tweets, allowRTs,get_user_activity)
 	dump_data = zip(account, corpus, searched_tweets)
 	pickle.dump(dump_data, open( './tweets', 'wb'))
 else:
