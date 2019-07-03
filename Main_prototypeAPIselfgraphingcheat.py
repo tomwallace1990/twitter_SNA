@@ -17,6 +17,7 @@
 #	9. Follower/following networks
 #	10. Get data from platfrom - set up query on alerter
 #	19. Ian suggestion - grab network at different time points and compare user position change, extension of 5.
+#	24. Seperate scrpt which searches for mentions about users and does sentiment
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
@@ -35,6 +36,8 @@
 #	18. Ian suggestion - Sentiment analysis on the corpus to work out if the given user is positive or negative, or topic modelling - would have to sort inbound or outbound
 #	21. Switch to full tweet objects to prevent truncating
 #	20. Add cheating - collect all of users tweets which fit the serach term and add them to the natural search (removing duplicates and tweets older than oldest search)
+#	23. More elegant retweeting toggle with '-filter:retweets' and filter the cheating function
+#	22. Add tweets about the given user to cheating
 
 #####Imports#####
 import pandas as pd
@@ -64,15 +67,15 @@ tokenpath = 'C:/Users/Tom Wallace/Dropbox/Stats/twitter_tokens/twitter-api-token
 random.seed(123456789)
 
 selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the egde list
-noresults = 10 # int. number of results to show
 removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
 edgeweighting_toggle = True # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 random_depth_gain = 500 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
-max_tweets = 2000 # How many tweets to request
+max_tweets = 1000 # How many tweets to request
 use_pickle_data = False
-get_user_activity = True
+get_user_activity = True # Scrape users time line in addition to normal search, biases network but increases chance of user in results
+getmentions_ofuser = True # Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
 
 query = '#ClimateEmergency' # Topic of the request
 given_user = 'greenpeace' # The input user to return results for
@@ -96,26 +99,34 @@ def athenticate(tokenpath):
 	return api
 
 def getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet):
-	print('Searching twitter for tweets from the given user. Please wait...')
+	print('Searching twitter for tweets from the given user (', given_user, '). Please wait...', sep='')
 	given_user_tweets = api.user_timeline(screen_name=given_user,count=250,tweet_mode='extended')
 
+	if getmentions_ofuser == True:
+		mentions_query = '@' + given_user + ' ' + query
+		mentionsofuser = [status for status in tweepy.Cursor(api.search, q=mentions_query, lang='en',tweet_mode='extended').items(250)]
+		mentionsofuser = [tweet for tweet in mentionsofuser if given_user.lower() in tweet.full_text.lower() and query.lower() in tweet.full_text.lower()]
+		given_user_tweets.extend(mentionsofuser)
+
 	given_user_tweets = [tweet for tweet in given_user_tweets if tweet.id>oldest_tweet] # This filters out tweets from the given user that are older than the oldest tweet collected in the main search
-	
 	given_user_tweets = [tweet for tweet in given_user_tweets if tweet.id not in searched_tweets] # Duplicate checking, filter any tweet which is already in searched tweets
 
-	given_user_author = [given_user for tweet in given_user_tweets]
+	if allowRTs == False:
+		given_user_tweets = [tweet for tweet in given_user_tweets if 'RT @' not in tweet.full_text] #remove retweets
+
+	given_user_author = [tweet.user.screen_name for tweet in given_user_tweets]
 
 	given_user_text=[]
 	for user_tweet in given_user_tweets:
 		if 'RT @' in user_tweet.full_text: # IF they are RT get the non tructated
 			try:
-				user_tweet = user_tweet.retweeted_status.full_text
+				user_tweet = 'RT @' + user_tweet.entities['user_mentions'][0]['screen_name'] + ': ' + user_tweet.retweeted_status.full_text
 			except:
 				user_tweet = user_tweet.full_text
 		else:
 			user_tweet = user_tweet.full_text
 		given_user_text.append(user_tweet)
-	
+
 	#This block filters the given user tweets so only ones relevant to the query are kept - this can be sensitive to the formatting of the query
 	given_user_tweets_filtered=[]
 	given_user_author_filtered=[]
@@ -133,15 +144,12 @@ def getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet):
 	return tweet_author, tweet_text, searched_tweets #return the filtered tweets for the given user - they still may get kicked out if none of theses tweets have an @
 
 def searchtwit(max_tweets, allowRTs,get_user_activity):
-	print('Searcing twitter for ', max_tweets, ' tweets about "', query, '". Please wait...', sep='')
-	searched_tweets = [status for status in tweepy.Cursor(api.search, q=query, lang='en',tweet_mode='extended').items(max_tweets)]
-	
-	filteredlist=[]
-	if allowRTs == False: # this version of the searchtwit function can filter out retweets if required
-		for tweet_obj in searched_tweets: # for each tweet object in the list returned from the search
-			if re.match('RT ', tweet_obj.text) is None: # re.match only searches from the front of the string, so no need to use a starting anchor ^
-				filteredlist.append(tweet_obj) # make a list of non RTs
-		searched_tweets = filteredlist # replace origional list with filtered list
+	print('Searching twitter for ', max_tweets, ' tweets about "', query, '". Please wait...', sep='')
+	if allowRTs == False:
+		search_query = query + '-filter:retweets' # This string can be appended onto a query to prevent the API returning retweets - this is much more efficiant than filtering post-search
+	else:
+		search_query = query
+	searched_tweets = [status for status in tweepy.Cursor(api.search, q=search_query, lang='en',tweet_mode='extended').items(max_tweets)]
 
 	tweet_author = [tweet.user.screen_name for tweet in searched_tweets] # get a list of just the authors of each tweet
 	#tweet_text = [tweet.text for tweet in searched_tweets] # get a list of just the text of each tweet
@@ -149,7 +157,7 @@ def searchtwit(max_tweets, allowRTs,get_user_activity):
 	for tweet in searched_tweets:
 		if 'RT @' in tweet.full_text: # IF they are RT get the non tructated
 			try:
-				tweet = tweet.retweeted_status.full_text
+				tweet = 'RT @' + user_tweet.entities['user_mentions'][0]['screen_name'] + ': ' + tweet.retweeted_status.full_text
 			except:
 				tweet = tweet.full_text
 		else:
@@ -161,7 +169,7 @@ def searchtwit(max_tweets, allowRTs,get_user_activity):
 		id_list.sort(reverse = False)
 		oldest_tweet = id_list[0] 
 		tweet_author, tweet_text, searched_tweets = getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet)
-	
+
 	return tweet_author, tweet_text, searched_tweets
 
 def removeduplicates(tweets):
@@ -506,7 +514,7 @@ corpus = [text.lower() for text in corpus]
 given_user=given_user.lower()
 
 if removedups == True:
-	corpus = removeduplicates(corpus)
+	corpus = removeduplicates(corpus) # how does this not unbalance the lists? check!
 
 #Create edge list
 sender, receiver = edgelister(account, corpus, selfloop, removedups) # Call the edgelister function to convert the authors and tweets into an edge list
