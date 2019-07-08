@@ -12,12 +12,14 @@
 #To do:
 
 #	3. Spike detection - automate selection of preiod, part of rolling input
-#	5. Rolling data input - last 3 days for example, import, process dates, variable to set slice period
+#	5. Rolling data input - last 3 days for example, import, process dates, variable to set slice period. can't get tweets older than a week so a week is a good period
 #	6. Interface - leave to Barrachd, I'll do backend
 #	9. Follower/following networks
 #	10. Get data from platfrom - set up query on alerter
 #	19. Ian suggestion - grab network at different time points and compare user position change, extension of 5.
 #	24. Seperate scrpt which searches for mentions about users and does sentiment
+#	25. graph in one direction - toggle
+#	26. application in Barrachd platform? speak to devs
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
@@ -72,7 +74,7 @@ edgeweighting_toggle = True # bool. This set whether to allow repeated contact b
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 random_depth_gain = 500 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
-max_tweets = 1000 # How many tweets to request
+max_tweets = 2500 # How many tweets to request
 use_pickle_data = False
 get_user_activity = True # Scrape users time line in addition to normal search, biases network but increases chance of user in results
 getmentions_ofuser = True # Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
@@ -98,6 +100,20 @@ def athenticate(tokenpath):
 	api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
 	return api
 
+def gettext_extended(list_of_tweet_objects):
+	tweettext=[]
+	for tweet in list_of_tweet_objects:
+		if 'RT @' in tweet.full_text: # IF they are RT get the non tructated
+			try:
+				tweet = 'RT @' + tweet.entities['user_mentions'][0]['screen_name'] + ': ' + tweet.retweeted_status.full_text
+			except:
+				tweet = tweet.full_text
+		else:
+			tweet = tweet.full_text
+		tweettext.append(tweet)
+
+	return tweettext
+
 def getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet):
 	print('Searching twitter for tweets from the given user (', given_user, '). Please wait...', sep='')
 	given_user_tweets = api.user_timeline(screen_name=given_user,count=250,tweet_mode='extended')
@@ -116,16 +132,7 @@ def getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet):
 
 	given_user_author = [tweet.user.screen_name for tweet in given_user_tweets]
 
-	given_user_text=[]
-	for user_tweet in given_user_tweets:
-		if 'RT @' in user_tweet.full_text: # IF they are RT get the non tructated
-			try:
-				user_tweet = 'RT @' + user_tweet.entities['user_mentions'][0]['screen_name'] + ': ' + user_tweet.retweeted_status.full_text
-			except:
-				user_tweet = user_tweet.full_text
-		else:
-			user_tweet = user_tweet.full_text
-		given_user_text.append(user_tweet)
+	given_user_text = gettext_extended(given_user_tweets)
 
 	#This block filters the given user tweets so only ones relevant to the query are kept - this can be sensitive to the formatting of the query
 	given_user_tweets_filtered=[]
@@ -153,16 +160,8 @@ def searchtwit(max_tweets, allowRTs,get_user_activity):
 
 	tweet_author = [tweet.user.screen_name for tweet in searched_tweets] # get a list of just the authors of each tweet
 	#tweet_text = [tweet.text for tweet in searched_tweets] # get a list of just the text of each tweet
-	tweet_text=[]
-	for tweet in searched_tweets:
-		if 'RT @' in tweet.full_text: # IF they are RT get the non tructated
-			try:
-				tweet = 'RT @' + user_tweet.entities['user_mentions'][0]['screen_name'] + ': ' + tweet.retweeted_status.full_text
-			except:
-				tweet = tweet.full_text
-		else:
-			tweet = tweet.full_text
-		tweet_text.append(tweet)
+
+	tweet_text = gettext_extended(searched_tweets)
 	
 	if get_user_activity == True: # get tweets from users timeline and append to the end of the authors, text, and object list
 		id_list = [tweet.id for tweet in searched_tweets]
@@ -611,12 +610,12 @@ print('Sentiment scores range between -1 (very negative) and 1 (very positive).\
 sentiment, number_of_tweets, example = sentiment_analysis(corpus, removedups) # get the sentiment
 print('The sentiment for the whole network is:', sentiment, 'based on', number_of_tweets, 'tweets.')
 print('This indicates', english_sentiment(sentiment),'sentiment.')
-print('Example of an average sentiment tweet: "',example,'"\n', sep='')
+print('-------------------------------------------\nExample of an average sentiment tweet: "',example,'"\n-------------------------------------------\n', sep='')
 
 #Mentions of given user
 corpus = [tweet for tweet in corpus if given_user in tweet] # keep just tweets about the given user
 sentiment_user, number_of_tweets, example = sentiment_analysis(corpus, removedups) # get the sentiment
 print('The sentiment for mentions of the given user is:', sentiment_user, 'based on', number_of_tweets, 'tweets.')
 print('This indicates', english_sentiment(sentiment_user),'sentiment.')
-print('Example of an average sentiment tweet: "',example,'"\n', sep='')
+print('-------------------------------------------\nExample of an average sentiment tweet: "',example,'"\n-------------------------------------------\n', sep='')
 
