@@ -31,7 +31,7 @@ from datetime import datetime
 force_lower = False
 no_of_tweets = 300 # Will collect this many and then filter by time based on 'days_to_get' below
 days_to_get = 7 # number of days to go back - default to 7 as that is the max than can be searched on the public API. set to 0 to disable time checking and get all tweets
-given_user='greenpeace'
+given_user='@netflix' # shell is good, british_airways? adidasUK? adidas>
 tokenpath = 'C:/Users/Tom Wallace/Dropbox/Stats/twitter_tokens/twitter-api-token_nyetarussian.json' # Tokens for API authentication
 
 #####Functions#####
@@ -181,11 +181,16 @@ if days_to_get !=0:
 	dayscreatedago = [(datetime.now()-tweet.created_at).days for tweet in tweets]
 	tweets = [tweet for tweet,time in zip(tweets,dayscreatedago) if time <=days_to_get]
 
-sincewhen = tweets[-1].created_at
+try:
+	sincewhen = tweets[-1].created_at
+except:
+	print('No tweets in given timefarame:', days_to_get, 'days.')
+	quit()
+
 print('\nBased on ',len(tweets),' tweets sent by ',given_user, ' in the last ', (datetime.now()-tweets[-1].created_at).days, ' days, this script returns the top topics and hashtags the user is active in.', sep='')
 print('These topics and hashtags may suggest networks the user is active in and may wish to search for.')
 print('The oldest tweet was sent at:', sincewhen)
 
 top_hashtags(tweets)
-topic(tweets)
+#topic(tweets)
 

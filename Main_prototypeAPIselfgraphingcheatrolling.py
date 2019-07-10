@@ -18,8 +18,11 @@
 #	10. Get data from platfrom - set up query on alerter
 #	19. Ian suggestion - grab network at different time points and compare user position change, extension of 5.
 #	24. Seperate scrpt which searches for mentions about users and does sentiment
-#	25. graph in one direction - toggle
-#	26. application in Barrachd platform? speak to devs
+#	25. graph in one direction - toggle??? every outbound is also an inbound
+#	26. application in Barrachd platform? speak to devs. 
+#	26.1 Alerter - bolt on network module, could only run on certain queries so have if rules. wouldn't have to take the users account if check that the given account is verified.
+#	26.2 Tracker - brands and buisness tracking of tweets, social media campaigns
+#	26.3 Alerter - system similar to non-parametric hetrogenous graph scan for identifying news about a topic quickly
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
@@ -60,7 +63,9 @@ import plotly.graph_objs as go
 import csv
 import subprocess
 import webbrowser
-from textblob import TextBlob 
+from textblob import TextBlob
+import os
+from datetime import datetime
 
 #####Parameters and settings#####
 projectpath = './' # Set the root folder
@@ -74,13 +79,13 @@ edgeweighting_toggle = True # bool. This set whether to allow repeated contact b
 allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 random_depth_gain = 500 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
-max_tweets = 2500 # How many tweets to request
-use_pickle_data = False
-get_user_activity = True # Scrape users time line in addition to normal search, biases network but increases chance of user in results
-getmentions_ofuser = True # Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
+max_tweets = 1200 # How many tweets to request
+use_pickle_data = True
+get_user_activity = False # Get users timeline in addition to normal search, biases network but increases chance of user in results. Useful if topic is large and user is not central to it
+getmentions_ofuser = False # Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
 
-query = '#ClimateEmergency' # Topic of the request
-given_user = 'greenpeace' # The input user to return results for
+query = '#ShellEcoMarathon' # Topic of the request Extinctionrebellion
+given_user = 'shell' # The input user to return results for greenpeace
 
 #####Functions#####
 
@@ -327,6 +332,16 @@ def print_results_userlevel(result_list, id_list, random_depth_gain):
 
 	print('You are more prominent than (or at least as prominent as) ', '%.1f' % percentile_list[given_user_counter], '% of users in this network!', sep='')
 	
+	#This chunk of code loads a text file contianing the result last time, prints it and the difference between it and now
+	#It then saves the current result to the textfile, overwriting it.
+	#If it doesn't find a file (first run) it skips the printing and makes the file
+	if os.path.isfile(previous_data_path + 'last_time_userlevel.txt'):
+		file = open(previous_data_path + 'last_time_userlevel.txt', 'r')
+		percentile_last_time = file.read()
+		print('Your prominence last time was ', '%.1f' % float(percentile_last_time), ', this is a difference of ', '%.1f' % (percentile_list[given_user_counter]-float(percentile_last_time)), '%', sep='')
+	with open(previous_data_path + 'last_time_userlevel.txt', 'w') as file:
+		file.write(str(percentile_list[given_user_counter]))
+
 	print("\nHere's how some verified public accounts scored")
 	previous_result = []
 	random_list = [random.uniform(0, 1) for each in index_list]
@@ -351,6 +366,38 @@ def print_results_userlevel(result_list, id_list, random_depth_gain):
 			result_count=result_count+1
 			if result_count > 20:
 				break
+
+def print_results_network(netowrk,searched_tweets):
+	print('Number of nodes (accounts):',nx.number_of_nodes(network))
+	print('Number of edges (mentions between accounts):',nx.number_of_edges(network))
+	print('Network density (% of possible edges which are extant): ',(nx.density(network))*100,'%',sep='') # this is in % so 100 times higher than standard density
+	print('Newest tweet sent at:',searched_tweets[0].created_at)
+	print('Oldest tweet sent at:',searched_tweets[-1].created_at)
+	print('Allow retweets:', str(allowRTs))
+	print('Allow repeated contact:', str(edgeweighting_toggle))
+	print('Remove duplicate tweets:', str(removedups))
+	print('Allow self loops:', str(selfloop))
+	print('Number of self loop edges:',nx.number_of_selfloops(network)) # This can be !0 even when the toggle is set to false as sometimes accounts retweet or mention themselves.
+	print('Get user activtiy:',str(get_user_activity))
+	if edgeweighting_toggle == False:
+		print('Transitivity (% of possible triangles which are extant):',nx.transitivity(network))
+	print('\n')
+
+	#Previous network stats
+	if os.path.isfile(previous_data_path + 'last_time_overall.txt'):
+		file = open(previous_data_path + 'last_time_overall.txt', 'r')
+		last_run_data = file.read().split(',')
+		print('In the previous network...\n-------------------------')
+		print('The number of nodes was:', last_run_data[0], 'a difference of', nx.number_of_nodes(network)-int(last_run_data[0]))
+		print('The number of edges was:', last_run_data[1], 'a difference of', nx.number_of_edges(network)-int(last_run_data[1]))
+		print('The density was:', last_run_data[2], 'a difference of', ((nx.density(network))*100)-float(last_run_data[2]))
+		print('\n')
+	with open(previous_data_path + 'last_time_overall.txt', 'w') as file:
+		file.write(str(nx.number_of_nodes(network)))
+		file.write(',')
+		file.write(str(nx.number_of_edges(network)))
+		file.write(',')
+		file.write(str((nx.density(network))*100))
 
 def simplegraphing(sender,receiver, influencers_list):
 	influencers_list = [item for sublist in influencers_list for item in sublist] # This flattens the list of influencers
@@ -384,14 +431,13 @@ def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
 	set_largest_comp = max(nx.connected_components(network_undir), key=len)
 	#set_largest_comp = nx.connected_components(network_undir)
 
-
 	largest_comp_send = [handle for handle in sender if handle in set_largest_comp or handle in given_user]
 	largest_comp_rec = [handle for handle in receiver if handle in set_largest_comp or handle in given_user]
 
 	edge_weights = edgecounter(largest_comp_send, largest_comp_rec, edgeweighting_toggle)
 
-	unique_set = set(largest_comp_send+largest_comp_rec)
-
+	unique_set = list(set(largest_comp_send+largest_comp_rec))
+	unique_set.sort()
 	nodes_exp = unique_set # all handles including hashed ones
 	nodes_exp_blanked = []
 	for node in nodes_exp: # This block writes an empty space for hashes users so they don't show up on the netowrk graph
@@ -404,7 +450,7 @@ def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
 	#group_exp = [1 for each in unique_set] # this just sets group to 1 for all
 	group_exp=[]
 	for each in unique_set: # This sets the user groups, 2 for hashed users, 1 for valid, and 3 for the given user
-		if len(each) > 50:
+		if len(each) > 50: # Hashed users identified by having names longer than 50 chars, twitter handles can't be that long.
 			group_exp.append(2)
 		elif each == given_user:
 			group_exp.append(3)
@@ -446,12 +492,23 @@ def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
 	file.close()
 
 	#R graph - call the R file
-	retcode = subprocess.call(['C:/Program Files/R/R-3.6.0/bin/Rscript.exe', '--vanilla', 'C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/GenerateNetwork.R'], shell=True)
+	retcode = subprocess.call(['C:/Program Files/R/R-3.6.0/bin/Rscript.exe', '--vanilla', './R/GenerateNetwork.R'], shell=True)
+
+	#Edit the HTML - this block uses regex to change one variable in the HTML to disable the mouseover behaviour
+	network_on_disk_html = "./R/Network.html" # Location of HTML graph on disk
+	HTMLfile = open(network_on_disk_html, 'r')
+	HTMLtext = HTMLfile.read() # Read in HTML as text
+	#var unfocusDivisor = 4; # this is the varaible that needs changed 4 > 1
+	HTMLtext = re.sub('(?<=var unfocusDivisor = )\d(?=;)','1',HTMLtext) # Change the var with regex
+	with open("./R/Network_fixed.html",'w') as output:
+		output.write(HTMLtext) # Wrtie the HTMLP backout as text
 
 	#Open the HTML graph R generates
 	new = 2 # open in a new tab
-	url = "C:/Users/Tom Wallace/Dropbox/2PostyGrady_theReturn/Internship/twitter_SNA/R/Network.html"
-	webbrowser.open(url,new=new)
+	full_path = (os.path.dirname(os.path.realpath(__file__))) # Browser needs a full path - get the path of this script
+	
+	url = full_path+"/R/Network_fixed.html" # combine script path to locate network
+	webbrowser.open(url,new=new) # Open the edited HTML
 
 def sentiment_analysis(corpus,removedups):
 	#This function calculates the average sentiment for a group of input tweets and returns an example tweet along side the average and number of tweets it was based on
@@ -481,11 +538,15 @@ def english_sentiment(sentiment_score):
 	#
 	if sentiment_score <= -0.5:
 		sentiment_in_english = 'very negative'
-	elif sentiment_score > -0.5 and sentiment_score <= -0.25:
+	elif sentiment_score > -0.5 and sentiment_score <= -0.3:
 		sentiment_in_english = 'negative'
-	elif sentiment_score >-0.25 and sentiment_score <0.25:
+	elif sentiment_score > -0.3 and sentiment_score <= -0.1:
+		sentiment_in_english = 'slightly negative'
+	elif sentiment_score >-0.1 and sentiment_score <0.1:
 		sentiment_in_english = 'neutral'
-	elif sentiment_score >= 0.25 and sentiment_score < 0.5:
+	elif sentiment_score >= 0.1 and sentiment_score < 0.3:
+		sentiment_in_english = 'slightly positive'
+	elif sentiment_score >= 0.3 and sentiment_score < 0.5:
 		sentiment_in_english = 'positive'
 	elif sentiment_score >= 0.5:
 		sentiment_in_english = 'very positive'
@@ -568,8 +629,22 @@ df_centrality = centrality(network) # Get the centrality metrics from the functi
 
 influencers_list=[] # initialize a list of top influencer accounts, used for graphing later
 
-#Print results
-print('\n\nYou in the network\n-------------------------')
+### Setting up the last time file
+current_time = datetime.now()
+previous_data_path = './Previous_data/'
+if not os.path.exists(previous_data_path): # If the path doesn't exist, make it
+	os.makedirs(previous_data_path)
+
+print('Network collection finished at (current time):', current_time)
+if os.path.isfile(previous_data_path + 'last_time_date.txt'):
+	file = open(previous_data_path + 'last_time_date.txt', 'r')
+	last_run_timedate = file.read()
+	print('Pervious data was collected at:', last_run_timedate)
+with open(previous_data_path + 'last_time_date.txt', 'w') as file:
+	file.write(str(current_time))
+
+#### Print results
+print('\n====================================\nYou in the network\n====================================')
 df_centrality['Combined_cent'] = df_centrality['degree'] + df_centrality['closeness'] + df_centrality['eigenvector']
 df_centrality = df_centrality.sort_values(by=['Combined_cent'],ascending=False)
 
@@ -579,43 +654,43 @@ index_list = list(df_centrality.index.tolist())
 print_results_userlevel(test_results,index_list,random_depth_gain)
 print('\n')
 
-#Network level metrics
-print('\nNetwork level metrics\n-------------------------')
-print('Number of nodes (accounts):',nx.number_of_nodes(network))
-print('Number of edges (mentions between accounts):',nx.number_of_edges(network))
-print('Network density (% of possible edges which are extant): ',(nx.density(network))*100,'%',sep='') # this is in % so 100 times higher than standard density
-print('Allow retweets:', str(allowRTs))
-print('Allow repeated contact:', str(edgeweighting_toggle))
-print('Remove duplicate tweets:', str(removedups))
-print('Allow self loops:', str(selfloop))
-print('Number of self loop edges:',nx.number_of_selfloops(network)) # This can be !0 even when the toggle is set to false as sometimes accounts retweet or mention themselves.
-print('Get user activtiy:',str(get_user_activity))
-if edgeweighting_toggle == False:
-	print('Transitivity (% of possible triangles which are extant):',nx.transitivity(network))
-print('\n')
+#### Network level metrics
+print('====================================\nNetwork level metrics\n====================================')
+print_results_network(network,searched_tweets)
 
-#print(nx.average_clustering(network)) # this may need an edge weight value which will need to be calculated
-
-#Simplistic Graphing - not great
+#### Simplistic Graphing - not great
 #simplegraphing(sender,receiver, influencers_list)
 
-#HTML interactive Graphing 2 - Snazy but not very customizable
+#### HTML interactive Graphing 2 - Snazy but not very customizable
 htmlgraph(network, sender, receiver, edgeweighting_toggle)
 
-#Sentiment analysis
+#### Sentiment analysis
 #Network overall
-print('Sentiment analysis\n-------------------------')
+print('====================================\nSentiment analysis\n====================================')
 print('Sentiment scores range between -1 (very negative) and 1 (very positive).\n')
 
 sentiment, number_of_tweets, example = sentiment_analysis(corpus, removedups) # get the sentiment
 print('The sentiment for the whole network is:', sentiment, 'based on', number_of_tweets, 'tweets.')
 print('This indicates', english_sentiment(sentiment),'sentiment.')
-print('-------------------------------------------\nExample of an average sentiment tweet: "',example,'"\n-------------------------------------------\n', sep='')
+print('_______________________________________________________________________\nExample of an average sentiment tweet: "',example,'"\n_______________________________________________________________________\n', sep='')
 
 #Mentions of given user
-corpus = [tweet for tweet in corpus if given_user in tweet] # keep just tweets about the given user
+corpus = [tweet for tweet in corpus if '@'+given_user+' ' in tweet] # keep just tweets about the given user
+if corpus==[]:
+	print('There were no mentions of the given user, all of thier links were outbound.')
+	quit()
 sentiment_user, number_of_tweets, example = sentiment_analysis(corpus, removedups) # get the sentiment
-print('The sentiment for mentions of the given user is:', sentiment_user, 'based on', number_of_tweets, 'tweets.')
+print('\nThe sentiment for mentions of the given user is:', sentiment_user, 'based on', number_of_tweets, 'tweets.')
 print('This indicates', english_sentiment(sentiment_user),'sentiment.')
-print('-------------------------------------------\nExample of an average sentiment tweet: "',example,'"\n-------------------------------------------\n', sep='')
+print('_______________________________________________________________________\nExample of an average sentiment tweet: "',example,'"\n_______________________________________________________________________\n', sep='')
 
+#Comparison for sentiment
+if os.path.isfile(previous_data_path + 'last_time_sentiment.txt'):
+	file = open(previous_data_path + 'last_time_sentiment.txt', 'r')
+	last_run_data = file.read().split(',')
+	print('In the previous network the overall sentiment was:', last_run_data[0], 'a difference of', sentiment-float(last_run_data[0]))
+	print('In the previous network the sentiment of mentions of give user was:', last_run_data[1], 'a difference of', sentiment_user-float(last_run_data[1]))
+with open(previous_data_path + 'last_time_sentiment.txt', 'w') as file:
+	file.write(str(sentiment))
+	file.write(',')
+	file.write(str(sentiment_user))
