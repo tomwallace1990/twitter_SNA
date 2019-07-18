@@ -1,4 +1,0 @@
-Can't profile users without a tick, so take in indidividual user and place them in the network (tell them what percentile they are in each centrality, show them where they are in the graph with nothing else labelled) show top 10 lists when ticked users only and others hashed (or just borken list 1. trump 3. blah 6. ugh - for example)
-
-so user would give you account and topic (could also scan thier account for topics), could use thier account to authenticate that it's them (have to send from thier account like my bot or they have to tweet a code from their account)
-

@@ -1,5 +1,4 @@
 library(networkD3)
-library(magrittr)
 
 #Force
 datNodes=read.csv("C:\\Users\\Tom Wallace\\Dropbox\\2PostyGrady_theReturn\\Internship\\twitter_SNA\\Data\\datNodes.csv", header=TRUE)
