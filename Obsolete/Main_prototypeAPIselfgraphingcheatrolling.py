@@ -80,7 +80,7 @@ allowRTs = True # Allow retweets or not, will reduce number of tweets imported b
 hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 random_depth_gain = 500 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
 max_tweets = 1200 # How many tweets to request
-use_pickle_data = False
+use_pickle_data = True
 get_user_activity = False # Get users timeline in addition to normal search, biases network but increases chance of user in results. Useful if topic is large and user is not central to it
 getmentions_ofuser = False # Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
 
