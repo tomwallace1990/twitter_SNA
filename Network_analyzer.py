@@ -1,48 +1,41 @@
 #Main
 #Tom Wallace
 #Created 28/05/2019
-#Description: This is a prototype for detecting influencers in twitter data.
-
-#Other ideas
-# Where am i in network given a topic (autosearching)
-# Time (REMs), event detection 
-# 
-
-
-#To do:
-
-#	3. Spike detection - automate selection of preiod, part of rolling input
-#	5. Rolling data input - last 3 days for example, import, process dates, variable to set slice period. can't get tweets older than a week so a week is a good period
-#	6. Interface - leave to Barrachd, I'll do backend
-#	9. Follower/following networks
-#	10. Get data from platfrom - set up query on alerter
-#	19. Ian suggestion - grab network at different time points and compare user position change, extension of 5.
-#	24. Seperate scrpt which searches for mentions about users and does sentiment
-#	25. graph in one direction - toggle??? every outbound is also an inbound
-#	26. application in Barrachd platform? speak to devs. 
-#	26.1 Alerter - bolt on network module, could only run on certain queries so have if rules. wouldn't have to take the users account if check that the given account is verified.
-#	26.2 Tracker - brands and buisness tracking of tweets, social media campaigns
-#	26.3 Alerter - system similar to non-parametric hetrogenous graph scan for identifying news about a topic quickly
+#Description: This is a prototype for detecting influencers in twitter data. Given a user and a topic it will user SNA centrality to determine how influential that user is in the given topic network.
+# The output is the most influential verified users, the position of the given user, some other verified users positions, a graph, and a sentiment analysis on the network as a whole and the mentions of the given user.
 
 #Done
 #	0. Basic functionality - read in data, manage data, build edge list, build network, compute metrics, print metrics
-#	2. Self links - toggle to allow or disallow - currenrly disallowed
+#	2. Self links - toggle to allow or disallow
 #	1. Duplicated tweet and bots - set a toggle to allow or disallow them
-#	4. Currently no edge weighting - repeated contact not taken into account
+#	4. Toggle for edge weighting - repeated contact taken into account or not
 #	7. Hash usernames to protect identity
-#	8. Toggle on/off or mark retweets - do they already do this? added to the searchtwit function in Bluetick.py
-#	13. Capitalisation
-#	11. Identify verified users
-#	14. Replace hashes in output
-#	12. Switch to be about given username
-#	15. Display grouped ranks rather than pure ordered scores becasue of invarience in scores (particularly in smaller networks) - used percentiles instead
+#	8. Toggle on/off or mark retweets - do they already do this? added to the searchtwit function in Bluetick.py (now obsolete 29/07/19)
+#	13. Deal with capitalisation mismatches
+#	11. Identify verified users with API calls and from tweet objects
+#	14. Only show non-hashed users
+#	12. Switch to be about given username rather than network overall
+#	15. Display percentile ranks rather than pure ordered scores because of invariance in scores (particularly in smaller networks)
 #	16. Gain control isn't working for people at the bottom (there are no handles below lowly ranked accounts which are below the gain value)
-#	17. Isolate the largest component and give it to R - could also just viz network around given user, or given user and top 10 or something
-#	18. Ian suggestion - Sentiment analysis on the corpus to work out if the given user is positive or negative, or topic modelling - would have to sort inbound or outbound
-#	21. Switch to full tweet objects to prevent truncating
-#	20. Add cheating - collect all of users tweets which fit the serach term and add them to the natural search (removing duplicates and tweets older than oldest search)
+#	17. Isolate the largest component and pass only data on it to R
+#	18. Ian suggestion - Sentiment analysis on the corpus to work out if the given user is positive or negative, or topic modelling
+#	21. Switch to full text in tweet objects to prevent truncating of text - not a big issue for networking but makes a different for sentiment analysis
+#	20. Add cheating - collect all of users tweets which fit the search term and add them to the natural search (removing duplicates and tweets older than oldest search)
 #	23. More elegant retweeting toggle with '-filter:retweets' and filter the cheating function
 #	22. Add tweets about the given user to cheating
+#	19. Ian suggestion - grab network at different time points and compare user position change, extension of 5. Currently compare to last run using txt files to store the results.
+#	27. Integrate verified dictionary produced by Verified_users_generator.py
+#	X. Separate script which searches for mentions about users and does sentiment. Not a feature for this code but would reuse many functions. Integrated into topic modeller
+
+#To do for the future
+#	3. Spike detection - automate selection of period, part of rolling input. May be best left to user graphically as in Tracker
+#	5. Rolling data input - last 3 days for example, import, process dates, variable to set slice period. can't get tweets older than a week so a week is a good period but depends on how noisy topic is
+#	6. Interface/front-end - depends on how this work is integrated into Barrachd systems
+#	9. Follower/following networks - should be easy enough to implement - would need another version of edgelister which handles follower/following and a module which grabs this data
+#	26. application in Barrachd platform
+#	26.1 Alerter - bolt on network module, could only run on certain queries so have if rules. wouldn't have to take the users account if check that the given account is verified.
+#	26.2 Tracker - brands and business tracking of tweets, social media campaigns
+#	26.3 Alerter - system similar to non-parametric heterogeneous graph scan for identifying news about a topic quickly
 
 #####Imports#####
 import pandas as pd
@@ -54,7 +47,6 @@ import numpy as np
 import hashlib
 import json
 import tweepy
-import pickle
 from time import sleep
 import random
 import scipy.stats as stats
@@ -66,26 +58,26 @@ import webbrowser
 from textblob import TextBlob
 import os
 from datetime import datetime
+import math
 
 #####Parameters and settings#####
 projectpath = './' # Set the root folder
 inputfile = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019.csv' # Manually set the input file
 tokenpath = 'C:/Users/Tom Wallace/Dropbox/Stats/twitter_tokens/twitter-api-token_nyetarussian.json' # Tokens for API authentication
-random.seed(123456789)
+random.seed(123456789) # Random is used to select which influential accounts to show after the top 10
 
-selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the egde list
+selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the edge list
 removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
 edgeweighting_toggle = True # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
-allowRTs = True # Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
-hashing_type = 'valid' # none, full, valid - type of hasing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
-random_depth_gain = 500 # This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
-max_tweets = 1200 # How many tweets to request
-use_pickle_data = True
-get_user_activity = False # Get users timeline in addition to normal search, biases network but increases chance of user in results. Useful if topic is large and user is not central to it
-getmentions_ofuser = False # Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
+allowRTs = True # bool. Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
+hashing_type = 'valid' # cat. 'none', 'full', 'valid' - type of hashing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
+random_depth_gain = 500 # int. This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
+max_tweets = 800 # int. How many tweets to request
+get_user_activity = False # bool. Get users timeline in addition to normal search, biases network but increases chance of user in results. Useful if topic is large and user is not central to it
+getmentions_ofuser = False # bool. Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
 
-query = '#ShellEcoMarathon' # Topic of the request Extinctionrebellion
-given_user = 'shell' # The input user to return results for greenpeace
+query = '#DareToCreate' # string. Topic of the request Extinctionrebellion
+given_user = 'adidasUK' # string. The input user to return results for greenpeace
 
 #####Functions#####
 
@@ -157,7 +149,7 @@ def getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet):
 	return tweet_author, tweet_text, searched_tweets #return the filtered tweets for the given user - they still may get kicked out if none of theses tweets have an @
 
 def searchtwit(max_tweets, allowRTs,get_user_activity):
-	print('Searching twitter for ', max_tweets, ' tweets about "', query, '". Please wait...', sep='')
+	print('Searching twitter for ', max_tweets, ' tweets on the topic "', query, '". Please wait...', sep='')
 	if allowRTs == False:
 		search_query = query + '-filter:retweets' # This string can be appended onto a query to prevent the API returning retweets - this is much more efficiant than filtering post-search
 	else:
@@ -484,7 +476,7 @@ def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
 	file.close()
 
 	#R graph - call the R file
-	retcode = subprocess.call(['C:/Program Files/R/R-3.6.0/bin/Rscript.exe', '--vanilla', './R/GenerateNetwork.R'], shell=True)
+	subprocess.call(['C:/Program Files/R/R-3.6.0/bin/Rscript.exe', '--vanilla', './R/GenerateNetwork.R'], shell=True)
 
 	#Edit the HTML - this block uses regex to change one variable in the HTML to disable the mouseover behaviour
 	network_on_disk_html = "./R/Network.html" # Location of HTML graph on disk
@@ -518,13 +510,16 @@ def sentiment_analysis(corpus,removedups):
 	number_of_tweets = len(corpus) # Calculate the n
 
 	deviations = list(map(lambda x :abs(x-ave_sentiment), sentiment_scores)) # Calculate the deviation of each data point from the mean as an absolute value
+	deviations_square = list(map(lambda x :x**2, deviations))
+	sd = math.sqrt(sum(deviations_square)/len(deviations_square))
+	sd = float(str(sd)[:4])
 
 	dataframe_data = zip(sentiment_scores,corpus,deviations) # Add to df so can sort the lists and keep them ordered relitively
 	df = pd.DataFrame(dataframe_data, columns=['score','tweet','deviations'])
 	df.sort_values(by=['deviations'],ascending=True, inplace=True) # sort by deviations so 'average' tweets rise to the top
 	example=list(df['tweet'])[0] # Get the first tweet of th ordered list - the closest to 'average' tweet
 
-	return ave_sentiment, number_of_tweets, example # return the average (float), number of tweets (int) and the example (string)
+	return ave_sentiment, number_of_tweets, example, sd # return the average (float), number of tweets (int) and the example (string)
 
 def english_sentiment(sentiment_score):
 	#
@@ -564,7 +559,7 @@ if removedups == True:
 
 #Create edge list
 sender, receiver = edgelister(account, corpus, selfloop, removedups) # Call the edgelister function to convert the authors and tweets into an edge list
-	# to save the data as an edge list, include an output path as option 3 abvoe such as outputpath = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019UTF8_edgelist.csv' 
+	# to save the data as an edge list, include an output path as option 3 above such as outputpath = projectpath + '/Data/Extinction rebellion/' + 'extinction rebellion spike 12.04.2019 to 02.05.2019UTF8_edgelist.csv' 
 	# Sender and receiver are not equal length lists showing the asymmetric links
 
 #Validation - prevalidate (get validation from existing tweet objects)
@@ -593,7 +588,7 @@ sender, receiver = hasher(sender, receiver, hashing_type, valid_dict, given_user
 
 #Create network
 network = spinnerette(sender, receiver, edgeweighting_toggle) # Get the network object from the constructor function
-#print(nx.info(network)) # Print network description for diganostic purposes
+#print(nx.info(network)) # Print network description for diagnostic purposes
 
 #Get node level metrics
 df_centrality = centrality(network) # Get the centrality metrics from the function by supplying the network
@@ -607,7 +602,7 @@ if not os.path.exists(previous_data_path): # If the path doesn't exist, make it
 	os.makedirs(previous_data_path)
 
 print('Network collection finished at (current time):', current_time)
-if os.paConstrth.isfile(previous_data_path + 'last_time_date.txt'):
+if os.path.isfile(previous_data_path + 'last_time_date.txt'):
 	file = open(previous_data_path + 'last_time_date.txt', 'r')
 	last_run_timedate = file.read()
 	print('Pervious data was collected at:', last_run_timedate)
@@ -633,7 +628,7 @@ print_results_network(network,searched_tweets)
 #### Simplistic Graphing - not great
 #simplegraphing(sender,receiver, influencers_list)
 
-#### HTML interactive Graphing 2 - Snazy but not very customizable
+#### HTML interactive Graphing 2 - Looks good but not very customizable, could be better if passed to the module in javascript and not the R wrapper
 htmlgraph(network, sender, receiver, edgeweighting_toggle)
 
 #### Sentiment analysis
@@ -641,8 +636,8 @@ htmlgraph(network, sender, receiver, edgeweighting_toggle)
 print('====================================\nSentiment analysis\n====================================')
 print('Sentiment scores range between -1 (very negative) and 1 (very positive).\n')
 
-sentiment, number_of_tweets, example = sentiment_analysis(corpus, removedups) # get the sentiment
-print('The sentiment for the whole network is:', sentiment, 'based on', number_of_tweets, 'tweets.')
+sentiment, number_of_tweets, example, sd = sentiment_analysis(corpus, removedups) # get the sentiment
+print('The sentiment for the whole network is:', sentiment, 'based on', number_of_tweets, 'tweets with a polarity of',sd)
 print('This indicates', english_sentiment(sentiment),'sentiment.')
 print('_______________________________________________________________________\nExample of an average sentiment tweet: "',example,'"\n_______________________________________________________________________\n', sep='')
 
@@ -651,8 +646,8 @@ corpus = [tweet for tweet in corpus if '@'+given_user+' ' in tweet] # keep just 
 if corpus==[]:
 	print('There were no mentions of the given user, all of thier links were outbound.')
 	quit()
-sentiment_user, number_of_tweets, example = sentiment_analysis(corpus, removedups) # get the sentiment
-print('\nThe sentiment for mentions of the given user is:', sentiment_user, 'based on', number_of_tweets, 'tweets.')
+sentiment_user, number_of_tweets, example, sd = sentiment_analysis(corpus, removedups) # get the sentiment
+print('\nThe sentiment for mentions of the given user is:', sentiment_user, 'based on', number_of_tweets, 'tweets with a polarity of',sd)
 print('This indicates', english_sentiment(sentiment_user),'sentiment.')
 print('_______________________________________________________________________\nExample of an average sentiment tweet: "',example,'"\n_______________________________________________________________________\n', sep='')
 
