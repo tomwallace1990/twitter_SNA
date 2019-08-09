@@ -97,7 +97,7 @@ def getValidHandles(api, valid_ids_list,valid_screen_names, invalid_count, error
 					error_file.write(str(user_id)+'\n')
 				continue # Move to the next ID in the big loop and skip the code below
 			else: # If the error is unknown then exit - the error may need to be added to the if statement above, or there could be a wider problem like Twitter being down
-				print('>>> WARN: Unhandled error code, exiting. Error ID:', user_id, 'Code:',e)
+				print('>>> WARN: Unhanded error code, exiting. Error ID:', user_id, 'Code:',e)
 				quit()
 
 		#By this point in the loop userinfo should contain a user object
@@ -137,10 +137,9 @@ api = athenticate(tokenpath)
 valid_ids_list = getIDs(api,usepickleIDs) # Get the list of IDs @verified is following by calling the function
 
 print('Number of IDs:',len(valid_ids_list)) # Print how many IDs were collected
-len_id_set = len(set(valid_ids_list))
-print('Number of unique IDs',len_id_set) # Print the length of the set to spot duplicates
 
 if len(valid_ids_list) != len(set(valid_ids_list)): # Check for duplicates
+	print('Number of unique IDs',len(set(valid_ids_list))) # Print the length of the set to spot duplicates
 	duplicates = [item for item, count in collections.Counter(valid_ids_list).items() if count > 1] # Get the duplicate handles in a list
 	print('WARN: There are duplicates in the list of IDs, using the set.')
 	print('Duplicate IDs:',duplicates) # More work is needed in getIDs to find out why it is returning duplicates

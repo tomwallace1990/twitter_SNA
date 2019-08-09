@@ -67,12 +67,12 @@ tokenpath = 'C:/Users/Tom Wallace/Dropbox/Stats/twitter_tokens/twitter-api-token
 random.seed(123456789) # Random is used to select which influential accounts to show after the top 10
 
 selfloop = False # bool. This sets whether to allow self loops, if 'True' tweets with no '@' (someone just tweeting but not mentioning another user) will be added to the edge list as 'author':'author' showing a left link. If 'False' these tweets will be excluded from the edge list
-removedups = True # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
+removedups = False # bool. This removes duplicate tweets which are often bots, it looks for identical text content (even from different accounts) but excludes URLs.
 edgeweighting_toggle = True # bool. This set whether to allow repeated contact between accounts to be accounted for, SNA analysis usually does not but 'True' is probably best default here
 allowRTs = True # bool. Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # cat. 'none', 'full', 'valid' - type of hashing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 random_depth_gain = 500 # int. This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
-max_tweets = 300 # int. How many tweets to request
+max_tweets = 800 # int. How many tweets to request
 get_user_activity = False # bool. Get users timeline in addition to normal search, biases network but increases chance of user in results. Useful if topic is large and user is not central to it
 getmentions_ofuser = False # bool. Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
 
@@ -173,8 +173,8 @@ def searchtwit(query,max_tweets, allowRTs,get_user_activity):
 		id_list.sort(reverse = False)
 		oldest_tweet = id_list[0] 
 		tweet_author, tweet_text, searched_tweets = getusertweets(tweet_author, tweet_text, searched_tweets, oldest_tweet)
-	
-	return tweet_author, tweet_text
+
+	return tweet_author, tweet_text, searched_tweets
 
 def removeduplicates(tweets):
 	#This is a very simple duplicate detector - it removes URLs and then removes tweets which are identical
@@ -211,9 +211,8 @@ def edgelister(authors, tweets, selfloop=False):
 		print('>>> WARN: Mismatch error <<<')
 		quit() # If something is wrong warn the user and exit
 
-def validate(all_handles):
+def validate(valid_dict, all_handles):
 	#This function reads in a validation dictionary and creates a true/false dictionary for the handles in the network
-	valid_dict = {}
 
 	with open('./valid_screennames.json') as json_file:  
 	    valid_screen_names = json.load(json_file)
@@ -352,12 +351,14 @@ def print_results_userlevel(result_centrality, index_list, random_depth_gain):
 			if result_count > 20:
 				break
 
-def print_results_network(netowrk):
+def print_results_network(netowrk,searched_tweets):
 	#This function prints overall network metrics and settings toggles. It also shows some results from the previous run.
 
 	print('Number of nodes (accounts):',nx.number_of_nodes(network))
 	print('Number of edges (mentions between accounts):',nx.number_of_edges(network))
 	print('Network density (% of possible edges which are extant): ',(nx.density(network))*100,'%',sep='') # this is in % so 100 times higher than standard density
+	print('Newest tweet sent at:',searched_tweets[0].created_at)
+	print('Oldest tweet sent at:',searched_tweets[-1].created_at)
 	print('Allow retweets:', str(allowRTs))
 	print('Allow repeated contact:', str(edgeweighting_toggle))
 	print('Remove duplicate tweets:', str(removedups))
@@ -432,7 +433,7 @@ def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
 		if len(node) > 50:
 			nodes_exp_blanked.append(' ')
 		else:
-			nodes_exp_blanked.append('[Redacted verified user]') # authenticated users can show up
+			nodes_exp_blanked.append(node) # authenticated users can show up
 	nodes_exp = nodes_exp_blanked
 
 	#group_exp = [1 for each in unique_set] # this just sets group to 1 for all
@@ -496,10 +497,6 @@ def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
 	full_path = (os.path.dirname(os.path.realpath(__file__))) # Browser needs a full path - get the path of this script
 	webbrowser.open(full_path+'/R/Network_fixed.html',new=2) # Open the edited HTML
 
-	#Remove the data after the graph is made - this stops data handing around on the disk
-	os.remove('./Data/datNodes.csv')
-	os.remove('./Data/datLinks.csv')
-
 def sentiment_analysis(corpus,removedups):
 	#This function calculates the average sentiment for a group of input tweets and returns an example tweet along side the average and number of tweets it was based on
 	
@@ -553,12 +550,15 @@ def english_sentiment(sentiment_score):
 api = athenticate(tokenpath)
 
 #Grab tweets on given topic from API. Account is list of senders, corpus is matching list of tweet text, searched_tweets is matching list of the full tweet objects
-account, corpus = searchtwit(query,max_tweets, allowRTs,get_user_activity)
+account, corpus, searched_tweets = searchtwit(query,max_tweets, allowRTs,get_user_activity)
 
 #Case conversion
 account = [text.lower() for text in account]
 corpus = [text.lower() for text in corpus]
 given_user=given_user.lower()
+
+if removedups == True:
+	corpus = removeduplicates(corpus) # how does this not unbalance the lists? check!
 
 #Create edge list
 sender, receiver = edgelister(account, corpus, selfloop) # Call the edgelister function to convert the authors and tweets into an edge list
@@ -572,7 +572,8 @@ if given_user not in all_handles:
 	quit()
 
 #Validation
-valid_dict = validate(all_handles)
+valid_dict = {}
+valid_dict = validate(valid_dict, all_handles)
 
 #Hash usernames
 sender, receiver = hasher(sender, receiver, hashing_type, valid_dict, given_user)
@@ -612,7 +613,7 @@ print('\n')
 
 #### Network level metrics
 print('====================================\nNetwork level metrics\n====================================')
-print_results_network(network)
+print_results_network(network,searched_tweets)
 
 #### Simplistic Graphing - not great
 #simplegraphing(sender,receiver, influencers_list)

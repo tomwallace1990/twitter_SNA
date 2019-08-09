@@ -29,8 +29,8 @@ import math
 #####Parameters and settings####
 tokenpath = 'C:/Users/Tom Wallace/Dropbox/Stats/twitter_tokens/twitter-api-token_nyetarussian.json' # Tokens for API authentication
 force_lower = True # bool. if False hashtags with different capitalisation will be counted separately, if true they will be forced to lowercase and combined
-no_of_tweets = 250 # int. Will collect this many and then filter by time based on 'days_to_get' below
-days_to_get = 7 # int. Number of days to go back - default to 7 as that is the max than can be searched on the public API. set to 0 to disable time checking and get all tweets
+no_of_tweets = 400 # int. Will collect this many and then filter by time based on 'days_to_get' below
+days_to_get = 30 # int. Number of days to go back - default to 7 as that is the max than can be searched on the public API. set to 0 to disable time checking and get all tweets
 results_to_print = 10 # int. Number of results to print from the top of the more used lists 
 type_of_search = 'at' # cat. 'by' user or 'at' user
 sentiment = True # bool. if true then perform sentiment analysis on the collected corpus. Uses the same functions as network analyser
@@ -39,6 +39,7 @@ given_user='@adidasUK' # string. Which user to search for shell, british_airways
 #####Functions#####
 def athenticate(tokenpath):
 	#Authenticate with the API and return an object which can call the API, this function is shared by other scripts
+	
 	token_file=open(tokenpath, 'r')
 	tokens = json.load(token_file)
 	token_file.close
@@ -56,6 +57,7 @@ def athenticate(tokenpath):
 
 def gettext_extended(list_of_tweet_objects):
 	#This function gets the full text of a tweet, which is in a different place in the object depending of if it is a mention or retweet. This function is used in other scripts.
+	
 	tweettext=[]
 	for tweet in list_of_tweet_objects:
 		if 'RT @' in tweet.full_text: # If the tweet is a RT then the full text is in 'retweeted_status.full_text'
@@ -72,6 +74,7 @@ def gettext_extended(list_of_tweet_objects):
 def top_hashtags(tweets):
 	#This function scans the tweets corpus for hashtags and counts them, printing the most commonly used in descending order
 	#This can take any corpus of tweets and the input depends on what is fed to it by main
+	
 	tweets = gettext_extended(tweets) # Replace the list of tweet objects with the full text
 	#If the script wasn't getting objects from the API then this line would need changed to accept the new input
 
@@ -145,7 +148,7 @@ def topic(tweets):
 	for each in tf_feature_names:
 		print(counter,'. ',each.capitalize(), sep='')
 		counter=counter+1
-		if counter==10:
+		if counter==results_to_print+1:
 			break
 
 	#Below is the actual modelling but it over-processes, it is designed for large bodies of text rather than tweets
@@ -172,6 +175,7 @@ def topic(tweets):
 
 def sentiment_analysis(corpus, removedups=False):
 	#This function calculates the average sentiment for a group of input tweets and returns an example tweet along side the average and number of tweets it was based on
+	
 	if removedups==True:
 		corpus = removeduplicates(corpus) # Remove duplicates
 
@@ -198,7 +202,8 @@ def sentiment_analysis(corpus, removedups=False):
 	return ave_sentiment, number_of_tweets, example, sd # return the average (float), number of tweets (int) and the example (string)
 
 def english_sentiment(sentiment_score):
-	#
+	#This function converts the -1 to 1 sentiment score into an English description for the user.
+	
 	if sentiment_score <= -0.5:
 		sentiment_in_english = 'very negative'
 	elif sentiment_score > -0.5 and sentiment_score <= -0.3:
@@ -244,7 +249,7 @@ print('These topics and hashtags may suggest networks the user is active in and 
 print('The oldest tweet was sent at:', sincewhen)
 
 top_hashtags(tweets) # Get the top hashtags, printing is from within the function
-#topic(tweets) # Get the top topics, printing is from within the function. Disabled as hashtags work far better for tweets.
+topic(tweets) # Get the top topics, printing is from within the function. Disabled as hashtags work far better for tweets.
 if sentiment == True:
 	tweets = gettext_extended(tweets)
 	sentiment, number_of_tweets, example, sd = sentiment_analysis(tweets)
