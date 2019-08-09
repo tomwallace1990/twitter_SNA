@@ -1,33 +1,3 @@
-
-tweets
-validdict
-R/Network_files/htmlwidgets-1.3/htmlwidgets.js
-R/Network_files/forceNetwork-binding-0.4/forceNetwork.js
-R/Network_files/d3-4.5.0/LICENSE
-R/Network_files/d3-4.5.0/d3.min.js
-R/Network.html
-Data/Extinction rebellion/extinction rebellion30052019_edgelistR.csv
-Data/Extinction rebellion/extinction rebellion30052019_edgelist_gephi.csv
-Data/datNodes.csv
-Data/datLinks.csv
-TOPICtweets
-tweetsBACK
-validdictBACK
-Frontend mockup/
-Pickle data/
-Previous_data/
-Notes/
-R/Network_files/
-Data/Valid_twitter_handles
-TW code for Ian.rar
-R/test.R
-R/.Rhistory
+/R/Network_files
 R/.RData
-Data/Valid_twitter_handles/valid_screennames_temp.json
-Data/Valid_twitter_handles/Invalid_users_IDs.txt
-Data/Valid_twitter_handles/Error_users_IDs.txt
-Data/Valid_twitter_handles/Error_users_IDs.txt
-R/test.R
-Data/Valid_twitter_handles/valid_screennames_temp.json
-Data/Valid_twitter_handles/Invalid_users_IDs.txt
-Data/Valid_twitter_handles/Error_users_IDs.txt
+R/.Rhistory
