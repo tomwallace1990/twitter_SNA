@@ -72,7 +72,7 @@ edgeweighting_toggle = True # bool. This set whether to allow repeated contact b
 allowRTs = True # bool. Allow retweets or not, will reduce number of tweets imported below value of 'max_tweets' as it filters after the import
 hashing_type = 'valid' # cat. 'none', 'full', 'valid' - type of hashing to apply. None: show all usernames. Full: show no usernames. valid: show valid users only (default).
 random_depth_gain = 500 # int. This is a gain control for how deep the results printer will look down the list of results, it will need to be larger for smaller networks
-max_tweets = 300 # int. How many tweets to request
+max_tweets = 700 # int. How many tweets to requestl
 get_user_activity = False # bool. Get users timeline in addition to normal search, biases network but increases chance of user in results. Useful if topic is large and user is not central to it
 getmentions_ofuser = False # bool. Sub option for 'get_user_activity', collections mentions of user, increases bias more but further increases chance of user in network
 
@@ -432,7 +432,7 @@ def htmlgraph(network, sender, receiver, edgeweighting_toggle=False):
 		if len(node) > 50:
 			nodes_exp_blanked.append(' ')
 		else:
-			nodes_exp_blanked.append('[Redacted verified user]') # authenticated users can show up
+			nodes_exp_blanked.append(node) # authenticated users can show up
 	nodes_exp = nodes_exp_blanked
 
 	#group_exp = [1 for each in unique_set] # this just sets group to 1 for all
@@ -599,9 +599,10 @@ with open(previous_data_path + 'last_time_date.txt', 'w') as file:
 	file.write(str(current_time))
 
 #### Print results
-df_centrality['Combined_cent'] = df_centrality['degree'] + df_centrality['closeness'] + df_centrality['eigenvector']
+#df_centrality['Combined_cent'] = df_centrality['degree'] + df_centrality['closeness'] + df_centrality['eigenvector']
 #df_centrality['Combined_cent'] = df_centrality['eigenvector']
-df_centrality = df_centrality.sort_values(by=['Combined_cent'],ascending=False)
+#df_centrality = df_centrality.sort_values(by=['Combined_cent'],ascending=False)
+df_centrality = df_centrality.sort_values(by=['degree', 'closeness','eigenvector'],ascending=False)
 
 test_results = list(df_centrality['Combined_cent'])
 index_list = list(df_centrality.index.tolist())
